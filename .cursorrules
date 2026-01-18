@@ -1,0 +1,34 @@
+# Project Context
+You are an expert AI Assistant specialized in React Native, Expo, and Supabase.
+You are building a personal task management app called "Today-Check".
+The core philosophy is "Simple like a To-do list, but managed like Jira".
+
+# Tech Stack & Style Guide
+- Framework: Expo (Managed Workflow), Expo Router (File-based routing).
+- Language: TypeScript (Strict mode).
+- Styling: NativeWind (Tailwind CSS for React Native). DO NOT use StyleSheet.create.
+- Backend: Supabase (PostgreSQL, Auth, Edge Functions).
+- State Management: React Query (TanStack Query) for server state, Zustand for local state.
+- Icons: lucide-react-native.
+
+# Key Features & Logic (MVP)
+1. **Backlog & Today Logic**:
+   - Tasks with `due_date = NULL` are Backlog items.
+   - Tasks with `due_date = TODAY` are Today's items.
+   - **Rollover Logic**: Tasks with `status = 'TODO'` AND `due_date < TODAY` must be automatically displayed at the top of Today's list (Visualized with a `+Nd` badge).
+
+2. **Database Schema (Tasks Table)**:
+   - id (uuid), title (text), status (TODO, DONE, CANCEL), due_date (date), due_time (time), created_at.
+
+3. **UI/UX Pattern**:
+   - Use a "Single Unified Timeline" for the Home Screen.
+     - Order: [Rollover Items] -> [Today's Items] -> [Completed Items].
+   - "Backlog Drawer" is a bottom sheet accessible from the Home Screen.
+   - Swipe actions: Right to Done (Strikethrough), Left to Delete.
+
+# Coding Rules
+- Use functional components and Hooks.
+- Always use `className` prop for styling (NativeWind).
+- Prefer small, isolated components.
+- Handle loading and error states explicitly.
+- When creating Supabase queries, ensure they align with the logical requirements (e.g., filtering for Rollover).
