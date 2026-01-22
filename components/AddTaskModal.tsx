@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { addDays, parse, format, differenceInCalendarDays } from 'date-fns';
+import { addDays, parse, format, differenceInCalendarDays, isToday, isTomorrow } from 'date-fns';
 import { useCreateTask } from '@/lib/hooks/use-create-task';
 
 interface AddTaskModalProps {
@@ -72,9 +72,9 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
   const handleSave = () => {
     if (!title.trim()) {
       if (Platform.OS === 'web') {
-        alert('제목을 입력해주세요');
+        alert('Please enter a title');
       } else {
-        Alert.alert('알림', '제목을 입력해주세요');
+        Alert.alert('Required', 'Please enter a title');
       }
       return;
     }
@@ -92,9 +92,9 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
       },
       onError: (error: any) => {
         if (Platform.OS === 'web') {
-          alert('저장 실패: ' + error.message);
+          alert('Failed to save: ' + error.message);
         } else {
-          Alert.alert('저장 실패', error.message);
+          Alert.alert('Save Failed', error.message);
         }
       },
     });
@@ -132,19 +132,19 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
   };
 
   const getDateButtonText = () => {
-    if (!dueDate) return '📅 날짜 선택';
+    if (!dueDate) return '📅 Pick Date';
     
-    // 로컬 타임존 기준으로 오늘/내일 판단
+    // Check if today or tomorrow in local timezone
     const today = new Date();
     const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
     
     const diffDays = Math.floor((dueDateOnly.getTime() - todayOnly.getTime()) / (1000 * 60 * 60 * 24));
     
-    if (diffDays === 0) return '오늘';
-    if (diffDays === 1) return '내일';
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Tomorrow';
     
-    return `${dueDate.getMonth() + 1}월 ${dueDate.getDate()}일`;
+    return format(dueDate, 'MMM d');
   };
 
   return (
@@ -166,7 +166,7 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
               {/* Header */}
               <View className="flex-row justify-between items-center mb-6">
                 <Text className="text-xl font-bold text-gray-900 dark:text-white">
-                  새 할 일
+                  New Task
                 </Text>
                 <Pressable onPress={handleClose}>
                   <Text className="text-gray-500 dark:text-gray-400 text-2xl">×</Text>
@@ -176,7 +176,7 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
               {/* Title Input */}
               <TextInput
                 className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-4 text-base text-gray-900 dark:text-white mb-4"
-                placeholder="할 일을 입력하세요"
+                placeholder="What do you want to do?"
                 placeholderTextColor="#9ca3af"
                 value={title}
                 onChangeText={setTitle}
@@ -186,7 +186,7 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
 
               {/* Quick Date Chips */}
               <View className="flex-row gap-2 mb-4">
-                {/* 오늘 버튼 */}
+                {/* Today button */}
                 <Pressable
                   onPress={() => handleQuickDate(new Date())}
                   className={`px-4 py-2 rounded-full ${
@@ -202,11 +202,11 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                         : 'text-gray-700 dark:text-gray-300'
                     }`}
                   >
-                    오늘
+                    Today
                   </Text>
                 </Pressable>
 
-                {/* 내일 버튼 */}
+                {/* Tomorrow button */}
                 <Pressable
                   onPress={() => handleQuickDate(addDays(new Date(), 1))}
                   className={`px-4 py-2 rounded-full ${
@@ -222,11 +222,11 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                         : 'text-gray-700 dark:text-gray-300'
                     }`}
                   >
-                    내일
+                    Tomorrow
                   </Text>
                 </Pressable>
 
-                {/* 날짜 선택 버튼 */}
+                {/* Pick date button */}
                 <Pressable
                   onPress={() => setShowDatePicker(true)}
                   className={`px-4 py-2 rounded-full ${
@@ -243,8 +243,8 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                     }`}
                   >
                     {dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
-                      ? format(dueDate, 'M월 d일')
-                      : '📅 날짜 선택'}
+                      ? format(dueDate, 'MMM d')
+                      : '📅 Pick Date'}
                   </Text>
                 </Pressable>
               </View>
@@ -256,7 +256,7 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                   className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 mb-4"
                 >
                   <Text className="text-gray-700 dark:text-gray-300">
-                    {dueTime ? `⏰ ${format(dueTime, 'HH:mm')}` : '⏰ 시간 선택 (선택사항)'}
+                    {dueTime ? `⏰ ${format(dueTime, 'HH:mm')}` : '⏰ Pick Time (Optional)'}
                   </Text>
                 </Pressable>
               )}
@@ -265,7 +265,7 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
               {Platform.OS === 'ios' && showDatePicker && (
                 <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4">
                   <DateTimePicker
-                    value={dueDate || new Date()} // 기본값: 오늘
+                    value={dueDate || new Date()} // Default: today
                     mode="date"
                     display="spinner"
                     onChange={(event, selectedDate) => {
@@ -283,14 +283,14 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                       className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-4 items-center border border-gray-200 dark:border-gray-700"
                     >
                       <Text className="text-gray-700 dark:text-gray-300 font-semibold">
-                        취소
+                        Cancel
                       </Text>
                     </Pressable>
                     <Pressable
                       onPress={() => setShowDatePicker(false)}
                       className="flex-1 bg-blue-600 rounded-xl py-4 items-center"
                     >
-                      <Text className="text-white font-semibold">확인</Text>
+                      <Text className="text-white font-semibold">Confirm</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -299,10 +299,10 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
               {Platform.OS === 'ios' && showTimePicker && (
                 <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4">
                   <DateTimePicker
-                    value={dueTime || getDefaultTime()} // 기본값: 현재시간 + 1시간, 00분
+                    value={dueTime || getDefaultTime()} // Default: current time + 1 hour, 00 min
                     mode="time"
                     display="spinner"
-                    minuteInterval={5} // 5분 간격
+                    minuteInterval={5} // 5-minute intervals
                     onChange={(event, selectedTime) => {
                       if (selectedTime) {
                         setDueTime(selectedTime);
@@ -318,14 +318,14 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                       className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-4 items-center border border-gray-200 dark:border-gray-700"
                     >
                       <Text className="text-gray-700 dark:text-gray-300 font-semibold">
-                        취소
+                        Cancel
                       </Text>
                     </Pressable>
                     <Pressable
                       onPress={() => setShowTimePicker(false)}
                       className="flex-1 bg-blue-600 rounded-xl py-4 items-center"
                     >
-                      <Text className="text-white font-semibold">확인</Text>
+                      <Text className="text-white font-semibold">Confirm</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -424,7 +424,7 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                     disabled={isCreating}
                   >
                     <Text className="text-gray-700 dark:text-gray-300 font-semibold">
-                      취소
+                      Cancel
                     </Text>
                   </Pressable>
 
@@ -436,7 +436,7 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
                     disabled={isCreating}
                   >
                     <Text className="text-white font-semibold">
-                      {isCreating ? '저장 중...' : '저장'}
+                      {isCreating ? 'Saving...' : 'Save'}
                     </Text>
                   </Pressable>
                 </View>

@@ -14,8 +14,10 @@ export interface Task {
   due_date: string | null; // ISO date string (YYYY-MM-DD) or null for Backlog
   due_time: string | null; // Time string (HH:MM:SS) or null
   original_due_date: string | null; // ISO date string, set once on creation
+  completed_at: string | null; // ISO timestamp when task was marked as DONE
   created_at: string; // ISO timestamp
   updated_at: string; // ISO timestamp
+  deleted_at: string | null; // Soft delete timestamp. NULL = active
 }
 
 // Type for creating a new task (omits auto-generated fields)
@@ -34,6 +36,7 @@ export interface UpdateTaskInput {
   status?: TaskStatus;
   due_date?: string | null;
   due_time?: string | null;
+  completed_at?: string | null;
   // Note: original_due_date should NOT be updated after creation
 }
 
