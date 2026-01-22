@@ -1,21 +1,21 @@
+import { AddTaskModal } from '@/components/AddTaskModal';
 import { AppHeader } from '@/components/AppHeader';
 import { EmptyState } from '@/components/EmptyState';
-import { AddTaskModal } from '@/components/AddTaskModal';
-import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
+import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
 import { updateTask } from '@/lib/api/tasks';
-import { signOut } from '@/lib/hooks/use-auth';
 import { useTimelineTasks } from '@/lib/hooks/use-timeline-tasks';
 import type { Task } from '@/lib/types';
-import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { Archive, ChevronLeft, ChevronRight, Clock, Package, Check, Plus } from 'lucide-react-native';
-import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek, subWeeks } from 'date-fns';
-import { ActivityIndicator, Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
-import { Swipeable, TapGestureHandler, State } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
+import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
+import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
+import { State, Swipeable, TapGestureHandler } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -50,6 +50,7 @@ export default function WeekScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { tasks, isLoading, isError, error, refetch } = useTimelineTasks();
+  const insets = useSafeAreaInsets();
   
   const flatListRef = useRef<FlatList>(null);
   const scrollViewRefs = useRef<Map<string, ScrollView>>(new Map()); // Refs for each week's ScrollView
@@ -316,6 +317,7 @@ export default function WeekScreen() {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
+        {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
         <AppHeader onNotificationPress={handleNotificationPress} />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -330,6 +332,7 @@ export default function WeekScreen() {
   if (isError) {
     return (
       <SafeAreaView style={styles.container}>
+        {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
         <AppHeader onNotificationPress={handleNotificationPress} />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontSize: 40, marginBottom: 16, color: colors.textMain }}>⚠️</Text>
@@ -391,6 +394,8 @@ export default function WeekScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Android only: Add top padding for status bar */}
+      {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
       {/* Header */}
       <AppHeader onNotificationPress={handleNotificationPress} />
 
