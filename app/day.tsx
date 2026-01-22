@@ -1,8 +1,9 @@
 // AppHeader removed for modal presentation
 import { EmptyState } from '@/components/EmptyState';
+import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
 import { validateStateTransition } from '@/lib/api/task-state-machine';
-import { deleteTask, postponeTaskToDate, updateTask } from '@/lib/api/tasks';
+import { deleteTask, updateTask } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useTimelineTasks } from '@/lib/hooks/use-timeline-tasks';
 import type { TaskStatus, TaskWithRollover } from '@/lib/types';
@@ -11,9 +12,9 @@ import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO,
 import * as Haptics from 'expo-haptics';
 import { Archive, ChevronLeft, ChevronRight, Clock, Package } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Swipeable, TapGestureHandler, LongPressGestureHandler, Gesture, GestureDetector, State } from 'react-native-gesture-handler';
+import { Swipeable, TapGestureHandler, Gesture, GestureDetector, State } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -45,10 +46,6 @@ export default function HomeScreen() {
   const flatListRef = useRef<FlatList>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const params = useLocalSearchParams<{ jumpToDate?: string }>();
-  const [currentDateIndex, setCurrentDateIndex] = useState(7); // Today is at index 7 (0-based)
-  const [currentDateDisplay, setCurrentDateDisplay] = useState(
-    format(startOfDay(new Date()), 'MMM d (EEE)')
-  );
   const [refreshing, setRefreshing] = useState(false);
   const isAtTop = useSharedValue(true); // Track if ScrollView is at top (shared value for gesture handler)
 
@@ -148,29 +145,24 @@ export default function HomeScreen() {
   }, [tasks]);
 
   const datePages = generateDatePages();
-
-  // Auto scroll to today on initial load, or to specific date from params
-  useEffect(() => {
-    if (!isLoading && datePages.length > 0) {
-      setTimeout(() => {
-        let targetIndex = 7; // Default: Today
-        
-        // If jumpToDate param exists, find the matching date index
-        if (params.jumpToDate) {
-          const targetDateStr = params.jumpToDate;
-          const foundIndex = datePages.findIndex(page => page.date === targetDateStr);
-          if (foundIndex !== -1) {
-            targetIndex = foundIndex;
-          }
-        }
-        
-        flatListRef.current?.scrollToIndex({
-          index: targetIndex,
-          animated: params.jumpToDate ? true : false, // Animate if jumping from WeekScreen
-        });
-      }, 100);
+  const initialDateIndex = useMemo(() => {
+    if (params.jumpToDate && datePages.length > 0) {
+      const foundIndex = datePages.findIndex(page => page.date === params.jumpToDate);
+      if (foundIndex !== -1) {
+        return foundIndex;
+      }
     }
-  }, [isLoading, datePages.length, params.jumpToDate]);
+    // Default: Today is at index 7 (0-based)
+    return 7;
+  }, [datePages, params.jumpToDate]);
+  
+  const [currentDateIndex, setCurrentDateIndex] = useState(() => initialDateIndex);
+  const [currentDateDisplay, setCurrentDateDisplay] = useState(() => {
+    const initialPage = datePages[initialDateIndex];
+    return initialPage ? (initialPage.isToday ? `Today · ${initialPage.displayDate}` : initialPage.displayDate) : format(startOfDay(new Date()), 'MMM d (EEE)');
+  });
+
+  // No need for auto-scroll useEffect - initialScrollIndex handles it
 
   // Track current visible page
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -209,6 +201,17 @@ export default function HomeScreen() {
       });
     }
   }, [currentDateIndex, datePages.length]);
+
+  // Navigate to specific date
+  const goToDate = useCallback((dateStr: string) => {
+    const targetIndex = datePages.findIndex(page => page.date === dateStr);
+    if (targetIndex !== -1) {
+      flatListRef.current?.scrollToIndex({
+        index: targetIndex,
+        animated: true,
+      });
+    }
+  }, [datePages]);
 
   // Keyboard navigation (Web only)
   useEffect(() => {
@@ -333,6 +336,11 @@ export default function HomeScreen() {
   const renderDayPage = ({ item }: { item: DayPage }) => {
     const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
     const isToday = item.isToday;
+    
+    // Navigate to specific date handler
+    const handleDateChange = (dateStr: string) => {
+      goToDate(dateStr);
+    };
     
     const containerContent = (
       <Animated.View
@@ -493,6 +501,7 @@ export default function HomeScreen() {
                     isOverdue={task.isOverdue}
                     daysOverdue={task.daysOverdue}
                     sectionDate={item.date}
+                    onDateChange={handleDateChange}
                   />
                 ))
               )}
@@ -578,7 +587,7 @@ export default function HomeScreen() {
             offset: (Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH) * index,
             index,
           })}
-          initialScrollIndex={7}
+          initialScrollIndex={initialDateIndex}
           onScrollToIndexFailed={(info) => {
             setTimeout(() => {
               flatListRef.current?.scrollToIndex({
@@ -601,12 +610,14 @@ function TaskItem({
   isOverdue = false,
   daysOverdue = 0,
   sectionDate,
+  onDateChange,
 }: { 
   task: TimelineTask; 
   isFuture: boolean;
   isOverdue: boolean;
   daysOverdue: number;
   sectionDate: string; // yyyy-MM-dd
+  onDateChange?: (dateStr: string) => void;
 }) {
   const queryClient = useQueryClient();
   const isCancelled = task.status === 'CANCEL';
@@ -661,8 +672,8 @@ function TaskItem({
     queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
   };
 
-  // Handle Tap
-  const handlePress = async () => {
+  // Handle Checkbox Tap
+  const handleCheckboxPress = async () => {
     // Toggle task status (including Future items)
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
@@ -675,141 +686,15 @@ function TaskItem({
     }
   };
 
-  // Handle Long Press - For TODO items
-  const handleLongPress = async () => {
-    if (!isTodo) return;
+  // Handle Title Press - Open Edit Sheet
+  const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
+  
+  const handleTitlePress = () => {
+    setIsEditSheetVisible(true);
+  };
 
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-
-    // Calculate next day from current section date
-    const currentDate = parseISO(sectionDate);
-    const nextDay = addDays(currentDate, 1);
-    const nextDayStr = format(nextDay, 'yyyy-MM-dd');
-
-    // iOS: ActionSheetIOS
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: 'What would you like to do?',
-          options: ['Complete', 'Postpone to Tomorrow', 'Cancel Task', 'Delete', 'Close'],
-          destructiveButtonIndex: 3,
-          cancelButtonIndex: 4,
-        },
-        async (buttonIndex) => {
-          if (buttonIndex === 0) {
-            await changeStatus('DONE');
-          } else if (buttonIndex === 1) {
-            const result = await postponeTaskToDate(task.id, nextDayStr);
-            if (result.error) {
-              Alert.alert('Error', 'Failed to postpone task');
-            } else {
-              queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-              const nextDayFormatted = format(nextDay, 'MMM d (EEE)');
-              Alert.alert('Success', `Task postponed to ${nextDayFormatted}`);
-            }
-          } else if (buttonIndex === 2) {
-            await changeStatus('CANCEL');
-          } else if (buttonIndex === 3) {
-            Alert.alert(
-              'Delete Task',
-              'Are you sure you want to delete this task?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    await deleteTask(task.id);
-                    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-                  },
-                },
-              ]
-            );
-          }
-        }
-      );
-    } else {
-      if (Platform.OS === 'web') {
-        const action = prompt('What would you like to do?\n1: Complete\n2: Postpone to Tomorrow\n3: Cancel Task\n4: Delete\n0: Close');
-        
-        if (action === '1') {
-          await changeStatus('DONE');
-        } else if (action === '2') {
-          const result = await postponeTaskToDate(task.id, nextDayStr);
-          if (result.error) {
-            alert('Failed to postpone task');
-          } else {
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-            const nextDayFormatted = format(nextDay, 'MMM d (EEE)');
-            alert(`Task postponed to ${nextDayFormatted}`);
-          }
-        } else if (action === '3') {
-          await changeStatus('CANCEL');
-        } else if (action === '4') {
-          if (confirm('Are you sure you want to delete this task?')) {
-            await deleteTask(task.id);
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-          }
-        }
-      } else {
-        Alert.alert(
-          'What would you like to do?',
-          '',
-          [
-            {
-              text: 'Complete',
-              onPress: async () => {
-                await changeStatus('DONE');
-              },
-            },
-            {
-              text: 'Postpone to Tomorrow',
-              onPress: async () => {
-                const result = await postponeTaskToDate(task.id, nextDayStr);
-                if (result.error) {
-                  Alert.alert('Error', 'Failed to postpone task');
-                } else {
-                  queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-                  const nextDayFormatted = format(nextDay, 'MMM d (EEE)');
-                  Alert.alert('Success', `Task postponed to ${nextDayFormatted}`);
-                }
-              },
-            },
-            {
-              text: 'Cancel Task',
-              onPress: async () => {
-                await changeStatus('CANCEL');
-              },
-            },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: () => {
-                Alert.alert(
-                  'Delete Task',
-                  'Are you sure you want to delete this task?',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Delete',
-                      style: 'destructive',
-                      onPress: async () => {
-                        await deleteTask(task.id);
-                        queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-                      },
-                    },
-                  ]
-                );
-              },
-            },
-            {
-              text: 'Close',
-              style: 'cancel',
-            },
-          ]
-        );
-      }
-    }
+  const handleTaskUpdate = () => {
+    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
   };
 
   // Send to Backlog (remove due_date)
@@ -851,18 +736,11 @@ function TaskItem({
   );
 
   // Render task item
-  const longPressRef = useRef(null);
   const tapRef = useRef(null);
 
-  const onSingleTap = (event: any) => {
+  const onCheckboxTap = (event: any) => {
     if (event.nativeEvent.state === State.END) {
-      handlePress();
-    }
-  };
-
-  const onLongPress = (event: any) => {
-    if (event.nativeEvent.state === State.ACTIVE) {
-      handleLongPress();
+      handleCheckboxPress();
     }
   };
 
@@ -880,75 +758,75 @@ function TaskItem({
         overshootLeft={false}
         enabled={isTodo} // Only enable swipe for TODO tasks
       >
-        <LongPressGestureHandler
-          ref={longPressRef}
-          onHandlerStateChange={onLongPress}
-          minDurationMs={500}
-        >
-          <TapGestureHandler
-            ref={tapRef}
-            onHandlerStateChange={onSingleTap}
-            maxDist={10}
-            waitFor={longPressRef}
-          >
-            <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 12 }}>
-        {/* Checkbox */}
-        <View 
-          style={[
-            {
-              width: 20,
-              height: 20,
-              borderRadius: borderRadius.full,
-              borderWidth: 2,
-              flexShrink: 0,
-              alignItems: 'center',
-              justifyContent: 'center',
-            },
-            isDone && {
-              backgroundColor: colors.success,
-              borderColor: colors.success,
-            },
-            isCancelled && {
-              backgroundColor: colors.gray300,
-              borderColor: colors.gray300,
-            },
-            !isDone && !isCancelled && {
-              borderColor: colors.gray300,
-            },
-          ]}
-        >
-          {isDone && (
-            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>✓</Text>
-          )}
-          {isCancelled && (
-            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>✕</Text>
-          )}
-        </View>
+            {/* Checkbox */}
+            <TapGestureHandler
+              ref={tapRef}
+              onHandlerStateChange={onCheckboxTap}
+              maxDist={10}
+            >
+              <View 
+                style={[
+                  {
+                    width: 20,
+                    height: 20,
+                    borderRadius: borderRadius.full,
+                    borderWidth: 2,
+                    flexShrink: 0,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  },
+                  isDone && {
+                    backgroundColor: colors.success,
+                    borderColor: colors.success,
+                  },
+                  isCancelled && {
+                    backgroundColor: colors.gray300,
+                    borderColor: colors.gray300,
+                  },
+                  !isDone && !isCancelled && {
+                    borderColor: colors.gray300,
+                  },
+                ]}
+              >
+                {isDone && (
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>✓</Text>
+                )}
+                {isCancelled && (
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>✕</Text>
+                )}
+              </View>
+            </TapGestureHandler>
 
-        {/* Task Title */}
-        <Text 
-          style={[
-            {
-              fontSize: 16,
-              flex: 1,
-            },
-            isDone && {
-              color: colors.textSub,
-              textDecorationLine: 'line-through',
-            },
-            isCancelled && {
-              color: colors.textDisabled,
-              textDecorationLine: 'line-through',
-            },
-            !isDone && !isCancelled && {
-              color: colors.textMain,
-              fontWeight: '500',
-            },
-          ]}
-        >
-          {task.title}
-        </Text>
+            {/* Task Title - Pressable */}
+            <Pressable
+              onPress={handleTitlePress}
+              style={{ flex: 1 }}
+            >
+              <Text 
+                style={[
+                  {
+                    fontSize: 16,
+                    flex: 1,
+                  },
+                  isDone && {
+                    color: colors.textSub,
+                    textDecorationLine: 'line-through',
+                  },
+                  isCancelled && {
+                    color: colors.textDisabled,
+                    textDecorationLine: 'line-through',
+                  },
+                  !isDone && !isCancelled && {
+                    color: colors.textMain,
+                    fontWeight: '500',
+                  },
+                ]}
+              >
+                {task.title}
+              </Text>
+            </Pressable>
 
         {/* Badges */}
         <View className="flex-row items-center gap-2 flex-shrink-0">
@@ -1010,7 +888,7 @@ function TaskItem({
                 fontSize: 12, 
                 fontWeight: '500' 
               }}>
-                {isLateCompletion} days late
+                +{isLateCompletion}
               </Text>
             </View>
           )}
@@ -1028,16 +906,28 @@ function TaskItem({
                 fontSize: 12, 
                 fontWeight: '500' 
               }}>
-                {daysOverdue} days late
+                +{daysOverdue}
               </Text>
             </View>
           )}
         </View>
-            </View>
           </View>
-        </TapGestureHandler>
-      </LongPressGestureHandler>
-    </Swipeable>
+        </View>
+      </Swipeable>
+      
+      {/* Edit Task Bottom Sheet */}
+      <EditTaskBottomSheet
+        visible={isEditSheetVisible}
+        onClose={() => setIsEditSheetVisible(false)}
+        task={{
+          id: task.id,
+          title: task.title,
+          due_date: task.due_date,
+          due_time: task.due_time,
+        }}
+        onUpdate={handleTaskUpdate}
+        onDateChange={onDateChange}
+      />
     </View>
   );
 }

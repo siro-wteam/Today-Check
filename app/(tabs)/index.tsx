@@ -172,20 +172,15 @@ export default function WeekScreen() {
   const weekPages = generateWeekPages();
 
   // Auto scroll to this week on initial load and when screen gains focus
+  // Initial load: scroll to current week (no auto-scroll to today)
   useEffect(() => {
     if (!isLoading && weekPages.length > 0) {
-      // Use a longer timeout to ensure FlatList is fully rendered
       const timeoutId = setTimeout(() => {
         flatListRef.current?.scrollToIndex({
-          index: 2, // This week is at index 2 (current week)
+          index: 2, // This week is at index 2
           animated: false,
         });
         setCurrentWeekIndex(2); // Update state to match
-        
-        // Scroll to today's card within the current week
-        setTimeout(() => {
-          scrollToTodayInWeek(weekPages[2]?.weekStartStr);
-        }, 300);
       }, 200);
       return () => clearTimeout(timeoutId);
     }
@@ -208,10 +203,10 @@ export default function WeekScreen() {
       });
     } else {
       // Fallback: if position not measured yet, use estimated position
-      const currentWeek = weekPages.find(w => w.weekStartStr === weekStartStr);
-      if (!currentWeek) return;
+      const week = weekPages.find(w => w.weekStartStr === weekStartStr);
+      if (!week) return;
 
-      const todayIndex = currentWeek.dailyGroups.findIndex(g => g.date === today);
+      const todayIndex = week.dailyGroups.findIndex(g => g.date === today);
       if (todayIndex === -1) return;
 
       const estimatedCardHeight = 200;
@@ -223,28 +218,8 @@ export default function WeekScreen() {
         animated: true,
       });
     }
-  }, [weekPages]);
+  }, [weekPages, scrollViewRefs, cardPositions]);
 
-  // Also scroll to current week when screen gains focus
-  useFocusEffect(
-    useCallback(() => {
-      if (!isLoading && weekPages.length > 0) {
-        const timeoutId = setTimeout(() => {
-          flatListRef.current?.scrollToIndex({
-            index: 2, // This week is at index 2 (current week)
-            animated: true, // Animate when returning to screen
-          });
-          setCurrentWeekIndex(2);
-          
-          // Scroll to today's card within the current week
-          setTimeout(() => {
-            scrollToTodayInWeek(weekPages[2]?.weekStartStr);
-          }, 200);
-        }, 100);
-        return () => clearTimeout(timeoutId);
-      }
-    }, [isLoading, weekPages.length, scrollToTodayInWeek])
-  );
 
   // Track current visible week
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -308,12 +283,14 @@ export default function WeekScreen() {
     }, [refetch])
   );
 
-  const renderWeekPage = ({ item }: { item: WeekPage }) => {
+  const renderWeekPage = ({ item, index }: { item: WeekPage; index: number }) => {
     const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
     
     return (
       <WeekPageComponent
         item={item}
+        weekIndex={index}
+        currentWeekIndex={currentWeekIndex}
         pageWidth={pageWidth}
         scrollViewRefs={scrollViewRefs}
         cardPositions={cardPositions}
@@ -363,13 +340,44 @@ export default function WeekScreen() {
     );
   }
 
-  // Calculate today's progress
+  // Calculate progress based on current week
   const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
-  const todayGroup = currentWeekPage?.dailyGroups.find(g => g.date === todayStr);
-  const todayTasks = todayGroup?.tasks || [];
-  const completedToday = todayTasks.filter(t => t.status === 'DONE').length;
-  const totalToday = todayTasks.length;
-  const progressPercent = totalToday > 0 ? Math.round((completedToday / totalToday) * 100) : 0;
+  const THIS_WEEK_INDEX = 2;
+  const isCurrentWeek = currentWeekIndex === THIS_WEEK_INDEX;
+  const isPastWeek = currentWeekIndex < THIS_WEEK_INDEX;
+  const isFutureWeek = currentWeekIndex > THIS_WEEK_INDEX;
+
+  let progressTitle = '';
+  let progressText = '';
+  let progressPercent = 0;
+  let totalTasks = 0;
+  let completedTasks = 0;
+
+  if (isCurrentWeek) {
+    // Current week: Show today's progress
+    const todayGroup = currentWeekPage?.dailyGroups.find(g => g.date === todayStr);
+    const todayTasks = todayGroup?.tasks || [];
+    completedTasks = todayTasks.filter(t => t.status === 'DONE').length;
+    totalTasks = todayTasks.length;
+    progressTitle = "Today's Progress";
+    progressText = `${completedTasks}/${totalTasks} Completed`;
+    progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  } else if (isPastWeek) {
+    // Past week: Show week's overall progress
+    const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
+    completedTasks = allWeekTasks.filter(t => t.status === 'DONE').length;
+    totalTasks = allWeekTasks.length;
+    progressTitle = "Week Progress";
+    progressText = `${completedTasks}/${totalTasks} Completed`;
+    progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  } else if (isFutureWeek) {
+    // Future week: Show upcoming tasks count
+    const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
+    totalTasks = allWeekTasks.length;
+    progressTitle = "Upcoming Tasks";
+    progressText = `${totalTasks} tasks`;
+    progressPercent = 0; // No progress for future
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -394,45 +402,49 @@ export default function WeekScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <View>
             <Text style={{ fontSize: 14, color: colors.primaryForeground, opacity: 0.9, marginBottom: 4 }}>
-              Today's Progress
+              {progressTitle}
             </Text>
             <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primaryForeground }}>
-              {completedToday}/{totalToday} Completed
+              {progressText}
             </Text>
           </View>
+          {!isFutureWeek && (
+            <View 
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: borderRadius.full,
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ fontSize: 20, fontWeight: '700', color: colors.primaryForeground }}>
+                {progressPercent}%
+              </Text>
+            </View>
+          )}
+        </View>
+        {/* Progress Bar - Only show for current and past weeks */}
+        {!isFutureWeek && (
           <View 
             style={{
-              width: 64,
-              height: 64,
+              height: 8,
               borderRadius: borderRadius.full,
               backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              alignItems: 'center',
-              justifyContent: 'center',
+              overflow: 'hidden',
             }}
           >
-            <Text style={{ fontSize: 20, fontWeight: '700', color: colors.primaryForeground }}>
-              {progressPercent}%
-            </Text>
+            <View 
+              style={{
+                height: '100%',
+                width: `${progressPercent}%`,
+                backgroundColor: colors.primaryForeground,
+                borderRadius: borderRadius.full,
+              }}
+            />
           </View>
-        </View>
-        {/* Progress Bar */}
-        <View 
-          style={{
-            height: 8,
-            borderRadius: borderRadius.full,
-            backgroundColor: 'rgba(255, 255, 255, 0.2)',
-            overflow: 'hidden',
-          }}
-        >
-          <View 
-            style={{
-              height: '100%',
-              width: `${progressPercent}%`,
-              backgroundColor: colors.primaryForeground,
-              borderRadius: borderRadius.full,
-            }}
-          />
-        </View>
+        )}
       </View>
 
       {/* Week Navigator */}
@@ -526,6 +538,8 @@ export default function WeekScreen() {
 // Week Page Component (separate component to use hooks)
 function WeekPageComponent({
   item,
+  weekIndex,
+  currentWeekIndex,
   pageWidth,
   scrollViewRefs,
   cardPositions,
@@ -536,6 +550,8 @@ function WeekPageComponent({
   scrollToTodayInWeek,
 }: {
   item: WeekPage;
+  weekIndex: number;
+  currentWeekIndex: number;
   pageWidth: number;
   scrollViewRefs: React.MutableRefObject<Map<string, ScrollView>>;
   cardPositions: React.MutableRefObject<Map<string, number>>;
@@ -546,6 +562,7 @@ function WeekPageComponent({
   scrollToTodayInWeek: (weekStartStr: string) => void;
 }) {
   const scrollViewRef = useRef<ScrollView>(null);
+  const THIS_WEEK_INDEX = 2; // This week is always at index 2
   
   // Store ref for this week's ScrollView
   useEffect(() => {
@@ -557,18 +574,23 @@ function WeekPageComponent({
     };
   }, [item.weekStartStr, scrollViewRefs]);
 
-  // Auto-scroll to today when this week page is rendered and it's the current week
+  // Auto-scroll to today ONLY when viewing the week that contains today
   useEffect(() => {
     const today = format(startOfDay(new Date()), 'yyyy-MM-dd');
-    const isCurrentWeek = item.dailyGroups.some(g => g.date === today);
+    const hasToday = item.dailyGroups.some(g => g.date === today);
     
-    if (isCurrentWeek && scrollViewRef.current && !isLoading) {
+    // Only scroll if:
+    // - This week contains today's date
+    // - We're currently viewing this week
+    // - ScrollView ref is available
+    // - Not loading
+    if (hasToday && currentWeekIndex === weekIndex && scrollViewRef.current && !isLoading) {
       const timeoutId = setTimeout(() => {
         scrollToTodayInWeek(item.weekStartStr);
       }, 200);
       return () => clearTimeout(timeoutId);
     }
-  }, [item.weekStartStr, item.dailyGroups, isLoading, scrollViewRef, scrollToTodayInWeek]);
+  }, [weekIndex, currentWeekIndex, item.weekStartStr, item.dailyGroups, isLoading, scrollToTodayInWeek]);
 
   return (
     <View 
@@ -689,7 +711,7 @@ function DailyCard({
     <View
       style={{
         width: 70,
-        height: '100%',
+        alignSelf: 'stretch',
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: colors.textSub,
@@ -697,7 +719,7 @@ function DailyCard({
         borderBottomLeftRadius: borderRadius.lg,
       }}
     >
-      <Archive size={20} color="#FFFFFF" strokeWidth={2} />
+      <Archive size={24} color="#FFFFFF" strokeWidth={2.5} />
     </View>
   );
 
@@ -847,7 +869,6 @@ function DailyCard({
                   style={[
                     {
                       borderRadius: borderRadius.lg, // rounded-xl (16px in v0, but using lg for consistency)
-                      padding: 12, // p-3
                       marginBottom: index < visibleTasks.length - 1 ? 8 : 0, // space-y-2
                     },
                     isDone && {
@@ -877,7 +898,7 @@ function DailyCard({
                       maxDist={10}
                     >
                       <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12 }}>
                           {/* Checkbox */}
                           <View 
                             style={[
@@ -1004,7 +1025,7 @@ function DailyCard({
                                   fontSize: 12, // text-xs
                                   fontWeight: '500' // font-medium
                                 }}>
-                                  {isLateCompletion} days late
+                                  +{isLateCompletion}
                                 </Text>
                               </View>
                             )}
@@ -1023,7 +1044,7 @@ function DailyCard({
                                   fontSize: 12, // text-xs
                                   fontWeight: '500' // font-medium
                                 }}>
-                                  {task.daysOverdue} days late
+                                  +{task.daysOverdue}
                                 </Text>
                               </View>
                             )}
