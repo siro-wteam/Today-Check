@@ -10,17 +10,17 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Modern Minimalist Color System
-        primary: '#3B82F6',
-        'primary-dark': '#2563EB',
+        // Modern Minimalist Color System - v0 디자인 색상 적용
+        primary: '#0080F0',
+        'primary-dark': '#0066C0',
         background: '#F9FAFB',
         card: '#FFFFFF',
-        'text-main': '#1F2937',
+        'text-main': '#222B38',
         'text-sub': '#9CA3AF',
         'text-disabled': '#D1D5DB',
         error: '#EF4444',
         warning: '#F59E0B',
-        success: '#10B981',
+        success: '#00A855',
         border: '#E5E7EB',
         'border-light': '#F3F4F6',
       },

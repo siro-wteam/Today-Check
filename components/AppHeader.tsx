@@ -1,6 +1,6 @@
 import { Bell } from 'lucide-react-native';
 import { Platform, Pressable, Text, View } from 'react-native';
-import { colors } from '@/constants/colors';
+import { colors, borderRadius } from '@/constants/colors';
 import { LogoIcon } from '@/components/ui/LogoIcon';
 
 interface AppHeaderProps {
@@ -10,25 +10,61 @@ interface AppHeaderProps {
 export function AppHeader({ onNotificationPress }: AppHeaderProps) {
   return (
     <View
-      className="bg-card px-6 py-4 border-b border-border"
-      style={Platform.OS === 'web' ? { maxWidth: 600, width: '100%', alignSelf: 'center' } : {}}
+      style={[
+        {
+          backgroundColor: 'rgba(255, 255, 255, 0.8)', // bg-card/80
+          paddingHorizontal: 16, // px-4
+          paddingVertical: 12, // py-3
+          borderBottomWidth: 1,
+          borderBottomColor: 'rgba(229, 231, 235, 0.5)', // border-border/50
+        },
+        Platform.OS === 'web' ? { maxWidth: 600, width: '100%', alignSelf: 'center' } : {},
+      ]}
     >
-      <View className="flex-row justify-between items-center">
-        {/* Left: Logo + Wordmark */}
-        <View className="flex-row items-center gap-2">
-          <LogoIcon size={32} color={colors.primary} />
-          <Text className="text-[22px] text-text-main">
-            <Text className="font-bold">Today</Text>
-            <Text className="font-normal">Check</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 8,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <LogoIcon size={36} color={colors.primary} />
+          </View>
+          <Text style={{ fontSize: 20, fontWeight: '700' }}>
+            <Text style={{ color: colors.primary }}>Today</Text>
+            <Text style={{ color: colors.textMain }}>Check</Text>
           </Text>
         </View>
 
-        {/* Right: Notification Bell */}
         <Pressable
           onPress={onNotificationPress}
-          className="p-2 rounded-lg active:opacity-70 active:bg-gray-100"
+          style={({ pressed }) => [
+            {
+              width: 40,
+              height: 40,
+              borderRadius: borderRadius.full,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? colors.gray100 : 'transparent',
+            },
+          ]}
         >
-          <Bell size={24} color={colors.textSub} strokeWidth={2} />
+          <Bell size={20} color={colors.textSub} strokeWidth={2} />
+          <View
+            style={{
+              position: 'absolute',
+              right: 8,
+              top: 8,
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: colors.error,
+            }}
+          />
         </Pressable>
       </View>
     </View>

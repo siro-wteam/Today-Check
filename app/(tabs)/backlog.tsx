@@ -1,5 +1,6 @@
 import { AppHeader } from '@/components/AppHeader';
 import { DatePickerModal } from '@/components/DatePickerModal';
+import { EmptyState } from '@/components/EmptyState';
 import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
 import { deleteTask, updateTask } from '@/lib/api/tasks';
 import { useBacklogTasks } from '@/lib/hooks/use-backlog-tasks';
@@ -7,9 +8,9 @@ import type { Task } from '@/lib/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Archive, Calendar } from 'lucide-react-native';
+import { Calendar, Check, Package } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Swipeable, TapGestureHandler, LongPressGestureHandler, State } from 'react-native-gesture-handler';
 
@@ -89,7 +90,7 @@ export default function BacklogScreen() {
       <SafeAreaView style={styles.container}>
         <AppHeader onNotificationPress={handleNotificationPress} />
         <View className="flex-1 items-center justify-center">
-          <Text className="text-4xl mb-4">⚠️</Text>
+            <Text style={{ fontSize: 40, marginBottom: 16, color: colors.textMain }}>⚠️</Text>
           <Text style={[styles.textMain, { fontSize: 16, fontWeight: '600', marginBottom: 8 }]}>
             Failed to load backlog
           </Text>
@@ -101,7 +102,7 @@ export default function BacklogScreen() {
             style={styles.primaryButton}
             className="active:opacity-70"
           >
-            <Text className="text-white font-semibold">Try Again</Text>
+            <Text style={{ color: colors.primaryForeground, fontWeight: '600' }}>Try Again</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -113,16 +114,26 @@ export default function BacklogScreen() {
       {/* Header */}
       <AppHeader onNotificationPress={handleNotificationPress} />
 
-      {/* Title Bar */}
+      {/* Section Header */}
       <View 
         style={[
-          styles.titleBar,
+          styles.sectionHeader,
           Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' }
         ]}
       >
-        <Text style={styles.title}>
-          No Due Date
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Package size={20} color={colors.textSub} strokeWidth={2} />
+          <Text style={styles.sectionTitle}>
+            No Due Date
+          </Text>
+          {tasks.filter(t => t.status === 'TODO').length > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>
+                {tasks.filter(t => t.status === 'TODO').length}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {/* Backlog List */}
@@ -134,26 +145,11 @@ export default function BacklogScreen() {
         }}
       >
         {tasks.length === 0 ? (
-          <View className="flex-1 items-center justify-center px-6">
-            <Text className="text-6xl mb-4">💡</Text>
-            <Text style={[styles.textMain, { fontSize: 20, fontWeight: '600', marginBottom: 8, textAlign: 'center' }]}>
-              Your backlog is empty
-            </Text>
-            <Text style={[styles.textSub, { textAlign: 'center', fontSize: 16 }]}>
-              Add ideas and tasks without dates here.{'\n'}Schedule them when you're ready!
-            </Text>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+            <EmptyState message="No tasks in backlog" />
           </View>
         ) : (
-          <FlatList
-            data={tasks}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <BacklogItem
-                task={item}
-                onSchedule={(dateStr) => handleScheduleTask(item.id, dateStr)}
-                onSwipeSchedule={() => handleSwipeRight(item.id)}
-              />
-            )}
+          <ScrollView
             style={Platform.OS === 'web' ? { 
               height: AVAILABLE_HEIGHT,
               overflow: 'auto' as any,
@@ -172,7 +168,51 @@ export default function BacklogScreen() {
                 colors={[colors.primary]}
               />
             }
-          />
+          >
+            {/* Incomplete Tasks */}
+            {tasks.filter(t => t.status === 'TODO').length > 0 && (
+              <View style={{ marginBottom: 12 }}>
+                {tasks
+                  .filter(t => t.status === 'TODO')
+                  .map((item) => (
+                    <BacklogItem
+                      key={item.id}
+                      task={item}
+                      onSchedule={(dateStr) => handleScheduleTask(item.id, dateStr)}
+                      onSwipeSchedule={() => handleSwipeRight(item.id)}
+                    />
+                  ))}
+              </View>
+            )}
+
+            {/* Completed Tasks Section */}
+            {tasks.filter(t => t.status === 'DONE').length > 0 && (
+              <View style={{ marginTop: 32 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingHorizontal: 4 }}>
+                  <Text style={styles.completedSectionTitle}>
+                    Completed
+                  </Text>
+                  <View style={[styles.badge, { backgroundColor: `${colors.success}1A` }]}>
+                    <Text style={[styles.badgeText, { color: colors.success }]}>
+                      {tasks.filter(t => t.status === 'DONE').length}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ gap: 12 }}>
+                  {tasks
+                    .filter(t => t.status === 'DONE')
+                    .map((item) => (
+                      <BacklogItem
+                        key={item.id}
+                        task={item}
+                        onSchedule={(dateStr) => handleScheduleTask(item.id, dateStr)}
+                        onSwipeSchedule={() => handleSwipeRight(item.id)}
+                      />
+                    ))}
+                </View>
+              </View>
+            )}
+          </ScrollView>
         )}
       </View>
 
@@ -224,16 +264,16 @@ function BacklogItem({
 
     if (newStatus === 'DONE') {
       if (Platform.OS === 'web') {
-        alert('오늘의 완료 목록으로 이동됨');
+        alert('Moved to today\'s completed list');
       } else {
-        Alert.alert('Completed', '오늘의 완료 목록으로 이동됨');
+        Alert.alert('Completed', 'Moved to today\'s completed list');
       }
     } else if (newStatus === 'TODO' && !task.due_date) {
       // Unchecked and assigned to today
       if (Platform.OS === 'web') {
-        alert('오늘 할 일로 배정됨');
+        alert('Scheduled for today');
       } else {
-        Alert.alert('Scheduled', '오늘 할 일로 배정됨');
+        Alert.alert('Scheduled', 'Scheduled for today');
       }
     }
   };
@@ -385,7 +425,7 @@ function BacklogItem({
       <View
         style={[
           styles.card,
-          { backgroundColor: colors.card }
+          isDone && { backgroundColor: `${colors.gray100}80` }, // Muted background for completed
         ]}
       >
         <Swipeable
@@ -403,67 +443,91 @@ function BacklogItem({
               maxDist={10}
             >
               <View style={{ flex: 1 }}>
-              <View style={{ 
-                flexDirection: 'row', 
-                alignItems: 'center', 
-                gap: 12,
-                paddingHorizontal: 16,
-                paddingVertical: 12,
-              }}>
-                {/* Checkbox */}
-                <View 
-                  style={[
-                    {
-                      width: 20,
-                      height: 20,
-                      borderRadius: borderRadius.full,
-                      borderWidth: 2,
-                      flexShrink: 0,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    },
-                    isDone && {
-                      backgroundColor: colors.success,
-                      borderColor: colors.success,
-                    },
-                    !isDone && {
-                      borderColor: colors.gray300,
-                    },
-                  ]}
-                >
-                  {isDone && (
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>✓</Text>
-                  )}
+                <View style={{ 
+                  flexDirection: 'row', 
+                  alignItems: 'center', 
+                  gap: 12,
+                  paddingHorizontal: 16,
+                  paddingVertical: 16,
+                }}>
+                  {/* Checkbox - Larger and more prominent */}
+                  <Pressable
+                    onPress={handleToggleComplete}
+                    style={[
+                      {
+                        width: 24,
+                        height: 24,
+                        borderRadius: borderRadius.full,
+                        borderWidth: 2,
+                        flexShrink: 0,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      },
+                      isDone && {
+                        backgroundColor: colors.success,
+                        borderColor: colors.success,
+                      },
+                      !isDone && {
+                        borderColor: `${colors.textSub}4D`, // 30% opacity
+                      },
+                    ]}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    {isDone && (
+                      <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                    )}
+                  </Pressable>
+
+                  {/* Task Title - 2 lines max */}
+                  <Text 
+                    style={[
+                      {
+                        fontSize: 15,
+                        flex: 1,
+                        lineHeight: 22,
+                      },
+                      isDone && {
+                        color: colors.textSub,
+                        textDecorationLine: 'line-through',
+                      },
+                      !isDone && {
+                        color: colors.textMain,
+                      },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {task.title}
+                  </Text>
+
+                  {/* Calendar Button */}
+                  <Pressable
+                    onPress={() => setIsDatePickerVisible(true)}
+                    style={[
+                      {
+                        width: 36,
+                        height: 36,
+                        borderRadius: borderRadius.md,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      },
+                      !isDone && {
+                        backgroundColor: 'transparent',
+                      },
+                    ]}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Calendar 
+                      size={20} 
+                      color={isDone ? colors.textSub : colors.textSub} 
+                      strokeWidth={2} 
+                    />
+                  </Pressable>
                 </View>
-
-                {/* Task Title */}
-                <Text 
-                  style={[
-                    {
-                      fontSize: 16,
-                      flex: 1,
-                    },
-                    isDone && {
-                      color: colors.textSub,
-                      textDecorationLine: 'line-through',
-                    },
-                    !isDone && {
-                      color: colors.textMain,
-                      fontWeight: '500',
-                    },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {task.title}
-                </Text>
-
-                {/* Swipe hint icon */}
-                <Calendar size={16} color={colors.textSub} strokeWidth={2} />
               </View>
-            </View>
-          </TapGestureHandler>
-        </LongPressGestureHandler>
-      </Swipeable>
+            </TapGestureHandler>
+          </LongPressGestureHandler>
+        </Swipeable>
       </View>
 
       {/* Date Picker Modal for this item */}
@@ -487,20 +551,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     ...(Platform.OS === 'web' && { height: '100vh' }),
   },
-  titleBar: {
+  sectionHeader: {
     backgroundColor: colors.card,
-    paddingHorizontal: 24,
-    paddingVertical: 14, // Match Home header padding
-    minHeight: 68, // Match Home header actual height (24px icon + 8px*2 button padding + 14px*2 vertical padding = 68px)
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    justifyContent: 'center', // Center content vertically
-    alignItems: 'center', // Center content horizontally
+    borderBottomColor: `${colors.border}80`, // 50% opacity
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  title: {
-    fontSize: 18, // Match Home header font size
-    fontWeight: '600', // Match Home header font weight
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: colors.textMain,
+  },
+  badge: {
+    borderRadius: borderRadius.full,
+    backgroundColor: `${colors.primary}1A`, // 10% opacity
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.primary,
+  },
+  completedSectionTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.textSub,
   },
   textMain: {
     color: colors.textMain,
@@ -517,10 +596,10 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    marginBottom: spacing.md,
+    borderRadius: borderRadius.xl, // More rounded (16px)
+    marginBottom: 12, // space-y-3 equivalent
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: `${colors.border}80`, // 50% opacity
     ...shadows.sm,
   },
 });

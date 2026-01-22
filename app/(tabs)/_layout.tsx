@@ -12,11 +12,12 @@ export default function TabLayout() {
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: '#3B82F6',
-          tabBarInactiveTintColor: '#9CA3AF',
+          tabBarActiveTintColor: '#0080F0', // Primary color
+          tabBarInactiveTintColor: '#4B5563', // Darker gray (gray600)
           tabBarStyle: {
             borderTopWidth: 1,
-            borderTopColor: '#E5E7EB',
+            borderTopColor: 'rgba(229, 231, 235, 0.5)', // border-border/50
+            backgroundColor: '#FFFFFF', // Pure white background
             paddingBottom: Platform.OS === 'ios' ? 20 : 10,
             paddingTop: 10,
             height: Platform.OS === 'ios' ? 90 : 70,
@@ -56,12 +57,13 @@ export default function TabLayout() {
             title: '',
             tabBarIcon: ({ focused }) => (
               <View
-                className="w-14 h-14 rounded-full bg-blue-600 items-center justify-center shadow-lg"
+                className="w-14 h-14 rounded-full items-center justify-center"
                 style={{
-                  marginTop: -20,
-                  shadowColor: '#3B82F6',
+                  marginTop: -16, // -translate-y-4
+                  backgroundColor: '#3B82F6', // bg-primary
+                  shadowColor: '#3B82F6', // shadow-primary
                   shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.3,
+                  shadowOpacity: 0.3, // shadow-primary/30
                   shadowRadius: 8,
                   elevation: 8,
                 }}

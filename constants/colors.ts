@@ -4,23 +4,24 @@
  */
 
 export const colors = {
-  // Primary
-  primary: '#3B82F6', // Electric Blue
-  primaryDark: '#2563EB', // Darker blue for active states
+  // Primary - v0 디자인 색상 적용
+  primary: '#0080F0', // v0 디자인 Primary 색상
+  primaryDark: '#0066C0', // Darker blue for active states
+  primaryForeground: '#FFFFFF', // White text on primary background
   
   // Backgrounds
-  background: '#F9FAFB', // Off White - Main BG
+  background: '#FAFAFA', // Off White - Main BG
   card: '#FFFFFF', // Pure White - Card/Item BG
   
-  // Text
-  textMain: '#1F2937', // Dark Gray - Primary text
-  textSub: '#9CA3AF', // Cool Gray - Secondary text
+  // Text - v0 디자인 색상 적용
+  textMain: '#222B38', // v0 디자인 Text Main 색상
+  textSub: '#6B7280', // Cool Gray - Secondary text
   textDisabled: '#D1D5DB', // Very light gray - Disabled
   
-  // Status Colors
+  // Status Colors - v0 디자인 색상 적용
   error: '#EF4444', // Soft Red - Overdue/Error
   warning: '#F59E0B', // Orange - Late completion
-  success: '#10B981', // Muted Green - Success/Done
+  success: '#00A855', // v0 디자인 Success 색상
   
   // Neutral Shades
   gray50: '#F9FAFB',
@@ -94,6 +95,14 @@ export const shadows = {
  * Typography
  */
 export const typography = {
+  // Font Family - Geist
+  fontFamily: {
+    regular: 'Geist-Regular',
+    medium: 'Geist-Medium',
+    semibold: 'Geist-SemiBold',
+    bold: 'Geist-Bold',
+  },
+  
   // Font Sizes
   xs: 12,
   sm: 14,

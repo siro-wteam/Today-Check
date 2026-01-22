@@ -1,4 +1,5 @@
 // AppHeader removed for modal presentation
+import { EmptyState } from '@/components/EmptyState';
 import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
 import { validateStateTransition } from '@/lib/api/task-state-machine';
 import { deleteTask, postponeTaskToDate, updateTask } from '@/lib/api/tasks';
@@ -8,11 +9,11 @@ import type { TaskStatus, TaskWithRollover } from '@/lib/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay, subDays } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Archive, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { Archive, ChevronLeft, ChevronRight, Clock, Package } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { Swipeable, TapGestureHandler, LongPressGestureHandler, Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Swipeable, TapGestureHandler, LongPressGestureHandler, Gesture, GestureDetector, State } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -428,8 +429,6 @@ export default function HomeScreen() {
                   paddingHorizontal: 16,
                   paddingTop: 16,
                   paddingBottom: 12,
-                  borderBottomWidth: 1,
-                  borderBottomColor: colors.border,
                 },
                 isToday && { backgroundColor: '#EFF6FF' }, // Light blue header for today
               ]}
@@ -482,11 +481,8 @@ export default function HomeScreen() {
               }}
             >
               {item.tasks.length === 0 ? (
-                <View style={{ minHeight: 100, alignItems: 'center', justifyContent: 'center', paddingVertical: 40 }}>
-                  <Text style={{ fontSize: 40, marginBottom: 16 }}>📝</Text>
-                  <Text style={[styles.textSub, { fontSize: 14 }]}>
-                    No tasks
-                  </Text>
+                <View style={{ paddingVertical: 4 }}>
+                  <EmptyState size="sm" message="No tasks scheduled" />
                 </View>
               ) : (
                 item.tasks.map((task, index) => (
@@ -875,6 +871,7 @@ function TaskItem({
       style={[
         styles.card,
         isOverdue && isTodo && styles.cardOverdue,
+        isDone && { backgroundColor: '#F8FAFC' }, // Completed task background
       ]}
     >
       <Swipeable
@@ -958,15 +955,20 @@ function TaskItem({
           {/* Time Badge */}
           {task.due_time && (
             <View style={{
-              backgroundColor: colors.gray100,
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#F1F5F9', // Slate 100
               paddingHorizontal: 8,
               paddingVertical: 4,
-              borderRadius: borderRadius.sm,
+              borderRadius: 6, // 4-6px range
             }}>
+              <View style={{ marginRight: 4 }}>
+                <Clock size={12} color="#475569" strokeWidth={2} />
+              </View>
               <Text style={{
                 fontSize: 12,
                 fontWeight: '500',
-                color: isDone || isCancelled ? colors.textDisabled : colors.textSub,
+                color: '#475569', // Slate 600
               }}>
                 {formatTime(task.due_time)}
               </Text>
@@ -976,17 +978,21 @@ function TaskItem({
           {/* From Backlog Badge - for DONE tasks without due_date */}
           {isDone && !task.due_date && (
             <View style={{
-              backgroundColor: colors.gray100,
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#F1F5F9', // Slate 100
               paddingHorizontal: 8,
               paddingVertical: 4,
-              borderRadius: borderRadius.sm,
+              borderRadius: 6, // 4-6px range
             }}>
+              <Package size={12} color="#475569" strokeWidth={2} />
               <Text style={{
                 fontSize: 12,
                 fontWeight: '500',
-                color: colors.textSub,
+                color: '#475569', // Slate 600
+                marginLeft: 4,
               }}>
-                📦 From Backlog
+                Backlog
               </Text>
             </View>
           )}
@@ -994,13 +1000,17 @@ function TaskItem({
           {/* Late Completion Badge - for DONE tasks completed after due_date */}
           {isLateCompletion > 0 && (
             <View style={{
-              backgroundColor: colors.warning,
+              backgroundColor: 'rgba(245, 158, 11, 0.2)', // bg-warning/20
               paddingHorizontal: 8,
               paddingVertical: 4,
               borderRadius: borderRadius.sm,
             }}>
-              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-                Late +{isLateCompletion}d
+              <Text style={{ 
+                color: colors.textMain, // text-main
+                fontSize: 12, 
+                fontWeight: '500' 
+              }}>
+                {isLateCompletion} days late
               </Text>
             </View>
           )}
@@ -1008,13 +1018,17 @@ function TaskItem({
           {/* Rollover Badge - only for overdue TODO items */}
           {isOverdue && daysOverdue > 0 && isTodo && (
             <View style={{
-              backgroundColor: colors.error,
+              backgroundColor: 'rgba(245, 158, 11, 0.2)', // bg-warning/20
               paddingHorizontal: 8,
               paddingVertical: 4,
               borderRadius: borderRadius.sm,
             }}>
-              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>
-                +{daysOverdue}d
+              <Text style={{ 
+                color: colors.textMain, // text-main
+                fontSize: 12, 
+                fontWeight: '500' 
+              }}>
+                {daysOverdue} days late
               </Text>
             </View>
           )}
