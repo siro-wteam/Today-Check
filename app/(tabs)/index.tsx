@@ -831,17 +831,18 @@ function DailyCard({
           </View>
 
           {/* Right side: Completion Badge and Navigation hint */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             {/* Completion Badge */}
             {group.totalCount > 0 ? (
               <Text 
                 style={{
-                  fontSize: 14, // text-sm
-                  color: colors.textSub, // text-muted-foreground
+                  fontSize: 14,
+                  color: colors.textSub,
+                  marginRight: 8,
                 }}
               >
                 <Text style={[
-                  isToday && { color: colors.primary, fontWeight: '500' } // text-primary font-medium when today
+                  isToday && { color: colors.primary, fontWeight: '500' }
                 ]}>
                   {String(group.completedCount)}
                 </Text>
@@ -869,11 +870,11 @@ function DailyCard({
                 justifyContent: 'center',
                 paddingVertical: 20,
                 paddingHorizontal: 16,
-                gap: 12,
               }}>
                 <Text style={{
                   fontSize: 14,
                   color: colors.textSub,
+                  marginBottom: 12,
                 }}>
                   No tasks scheduled
                 </Text>
@@ -884,18 +885,18 @@ function DailyCard({
                     alignItems: 'center',
                     backgroundColor: 'transparent',
                     borderWidth: 1,
-                    borderColor: '#E2E8F0', // slate-200
+                    borderColor: '#E2E8F0',
                     paddingHorizontal: 20,
                     paddingVertical: 10,
                     borderRadius: borderRadius.md,
-                    gap: 6,
                   }}
                 >
-                  <Plus size={16} color="#94A3B8" strokeWidth={2} /> {/* slate-400 */}
+                  <Plus size={16} color="#94A3B8" strokeWidth={2} />
                   <Text style={{
                     fontSize: 14,
-                    color: '#94A3B8', // slate-400
+                    color: '#94A3B8',
                     fontWeight: '500',
+                    marginLeft: 6,
                   }}>
                     Tap to add
                   </Text>
@@ -1136,9 +1137,8 @@ function DailyCard({
                   borderRadius: borderRadius.md,
                   backgroundColor: 'transparent',
                   borderWidth: 2,
-                  borderColor: 'rgba(156, 163, 175, 0.2)', // border-muted-foreground/20
+                  borderColor: 'rgba(156, 163, 175, 0.2)',
                   borderStyle: 'dashed',
-                  gap: 6,
                 }}
               >
                 <Plus size={16} color={colors.textSub} strokeWidth={2} />
@@ -1146,6 +1146,7 @@ function DailyCard({
                   fontSize: 14,
                   color: colors.textSub,
                   fontWeight: '500',
+                  marginLeft: 6,
                 }}>
                   Add a task
                 </Text>
