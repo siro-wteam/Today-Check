@@ -16,9 +16,10 @@ import { useCreateTask } from '@/lib/hooks/use-create-task';
 interface AddTaskModalProps {
   visible: boolean;
   onClose: () => void;
+  initialDate?: string; // yyyy-MM-dd format, optional default date
 }
 
-export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
+export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProps) {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [dueTime, setDueTime] = useState<Date | null>(null);
@@ -29,6 +30,19 @@ export function AddTaskModal({ visible, onClose }: AddTaskModalProps) {
   const timeInputRef = useRef<any>(null);
 
   const { createTask, isCreating } = useCreateTask();
+
+  // Set initial date when modal opens or initialDate changes
+  useEffect(() => {
+    if (visible && initialDate) {
+      const parsedDate = parse(initialDate, 'yyyy-MM-dd', new Date());
+      if (!isNaN(parsedDate.getTime())) {
+        setDueDate(parsedDate);
+      }
+    } else if (visible && !initialDate) {
+      // Reset to null if no initialDate provided
+      setDueDate(null);
+    }
+  }, [visible, initialDate]);
 
   // 기본 시간 계산: 현재시간 + 1시간, 분은 00분
   const getDefaultTime = () => {

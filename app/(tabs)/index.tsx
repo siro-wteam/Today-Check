@@ -1,5 +1,6 @@
 import { AppHeader } from '@/components/AppHeader';
 import { EmptyState } from '@/components/EmptyState';
+import { AddTaskModal } from '@/components/AddTaskModal';
 import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
 import { updateTask } from '@/lib/api/tasks';
 import { signOut } from '@/lib/hooks/use-auth';
@@ -8,7 +9,7 @@ import type { Task } from '@/lib/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { Archive, ChevronLeft, ChevronRight, Clock, Package, Check } from 'lucide-react-native';
+import { Archive, ChevronLeft, ChevronRight, Clock, Package, Check, Plus } from 'lucide-react-native';
 import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek, subWeeks } from 'date-fns';
 import { ActivityIndicator, Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { Swipeable, TapGestureHandler, State } from 'react-native-gesture-handler';
@@ -56,6 +57,8 @@ export default function WeekScreen() {
   const [currentWeekIndex, setCurrentWeekIndex] = useState(2); // This week is at index 2
   const [currentWeekDisplay, setCurrentWeekDisplay] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [isAddTaskModalVisible, setIsAddTaskModalVisible] = useState(false);
+  const [addTaskInitialDate, setAddTaskInitialDate] = useState<string | undefined>(undefined);
 
   // Generate week pages: This week -2 to +2 (5 weeks total)
   const generateWeekPages = useCallback((): WeekPage[] => {
@@ -283,6 +286,12 @@ export default function WeekScreen() {
     }, [refetch])
   );
 
+  // Handle quick add task
+  const handleQuickAdd = (dateStr: string) => {
+    setAddTaskInitialDate(dateStr);
+    setIsAddTaskModalVisible(true);
+  };
+
   const renderWeekPage = ({ item, index }: { item: WeekPage; index: number }) => {
     const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
     
@@ -299,6 +308,7 @@ export default function WeekScreen() {
         onRefresh={onRefresh}
         onDateCardPress={handleDateCardPress}
         scrollToTodayInWeek={scrollToTodayInWeek}
+        onQuickAdd={handleQuickAdd}
       />
     );
   };
@@ -531,6 +541,16 @@ export default function WeekScreen() {
           }}
         />
       </View>
+
+      {/* Add Task Modal */}
+      <AddTaskModal
+        visible={isAddTaskModalVisible}
+        onClose={() => {
+          setIsAddTaskModalVisible(false);
+          setAddTaskInitialDate(undefined);
+        }}
+        initialDate={addTaskInitialDate}
+      />
     </SafeAreaView>
   );
 }
@@ -548,6 +568,7 @@ function WeekPageComponent({
   onRefresh,
   onDateCardPress,
   scrollToTodayInWeek,
+  onQuickAdd,
 }: {
   item: WeekPage;
   weekIndex: number;
@@ -560,6 +581,7 @@ function WeekPageComponent({
   onRefresh: () => void;
   onDateCardPress: (date: string) => void;
   scrollToTodayInWeek: (weekStartStr: string) => void;
+  onQuickAdd: (dateStr: string) => void;
 }) {
   const scrollViewRef = useRef<ScrollView>(null);
   const THIS_WEEK_INDEX = 2; // This week is always at index 2
@@ -635,6 +657,7 @@ function WeekPageComponent({
             onPress={() => onDateCardPress(group.date)}
             weekStartStr={item.weekStartStr}
             cardPositions={cardPositions}
+            onQuickAdd={onQuickAdd}
           />
         ))}
       </ScrollView>
@@ -648,11 +671,13 @@ function DailyCard({
   onPress,
   weekStartStr,
   cardPositions,
+  onQuickAdd,
 }: { 
   group: DailyGroup; 
   onPress: () => void;
   weekStartStr: string;
   cardPositions: React.MutableRefObject<Map<string, number>>;
+  onQuickAdd: (dateStr: string) => void;
 }) {
   const queryClient = useQueryClient();
   const todayDate = startOfDay(new Date());
@@ -837,7 +862,48 @@ function DailyCard({
       }}>
         {visibleTasks.length === 0 ? (
           <View style={{ paddingVertical: 4 }}>
-            <EmptyState size="sm" message="No tasks scheduled" />
+            {/* Empty State with Quick Add - Only for Today and Future */}
+            {!isPast ? (
+              <View style={{
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingVertical: 20,
+                paddingHorizontal: 16,
+                gap: 12,
+              }}>
+                <Text style={{
+                  fontSize: 14,
+                  color: colors.textSub,
+                }}>
+                  No tasks scheduled
+                </Text>
+                <Pressable
+                  onPress={() => onQuickAdd(group.date)}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    borderColor: '#E2E8F0', // slate-200
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: borderRadius.md,
+                    gap: 6,
+                  }}
+                >
+                  <Plus size={16} color="#94A3B8" strokeWidth={2} /> {/* slate-400 */}
+                  <Text style={{
+                    fontSize: 14,
+                    color: '#94A3B8', // slate-400
+                    fontWeight: '500',
+                  }}>
+                    Tap to add
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <EmptyState size="sm" message="No tasks scheduled" />
+            )}
           </View>
         ) : (
           <View>
@@ -1056,6 +1122,35 @@ function DailyCard({
                 </View>
               );
             })}
+            {/* Footer - Quick Add Button (Only for Today and Future) */}
+            {!isPast && visibleTasks.length > 0 && (
+              <Pressable
+                onPress={() => onQuickAdd(group.date)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  marginTop: 8,
+                  borderRadius: borderRadius.md,
+                  backgroundColor: 'transparent',
+                  borderWidth: 2,
+                  borderColor: 'rgba(156, 163, 175, 0.2)', // border-muted-foreground/20
+                  borderStyle: 'dashed',
+                  gap: 6,
+                }}
+              >
+                <Plus size={16} color={colors.textSub} strokeWidth={2} />
+                <Text style={{
+                  fontSize: 14,
+                  color: colors.textSub,
+                  fontWeight: '500',
+                }}>
+                  Add a task
+                </Text>
+              </Pressable>
+            )}
           </View>
         )}
       </View>

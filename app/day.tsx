@@ -1,6 +1,7 @@
 // AppHeader removed for modal presentation
 import { EmptyState } from '@/components/EmptyState';
 import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
+import { AddTaskModal } from '@/components/AddTaskModal';
 import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
 import { validateStateTransition } from '@/lib/api/task-state-machine';
 import { deleteTask, updateTask } from '@/lib/api/tasks';
@@ -10,7 +11,7 @@ import type { TaskStatus, TaskWithRollover } from '@/lib/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay, subDays } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Archive, ChevronLeft, ChevronRight, Clock, Package } from 'lucide-react-native';
+import { Archive, ChevronLeft, ChevronRight, Clock, Package, Plus } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -47,6 +48,8 @@ export default function HomeScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const params = useLocalSearchParams<{ jumpToDate?: string }>();
   const [refreshing, setRefreshing] = useState(false);
+  const [isAddTaskModalVisible, setIsAddTaskModalVisible] = useState(false);
+  const [addTaskInitialDate, setAddTaskInitialDate] = useState<string | undefined>(undefined);
   const isAtTop = useSharedValue(true); // Track if ScrollView is at top (shared value for gesture handler)
 
   // Drag to dismiss animation values
@@ -212,6 +215,12 @@ export default function HomeScreen() {
       });
     }
   }, [datePages]);
+
+  // Handle quick add task
+  const handleQuickAdd = useCallback((dateStr: string) => {
+    setAddTaskInitialDate(dateStr);
+    setIsAddTaskModalVisible(true);
+  }, []);
 
   // Keyboard navigation (Web only)
   useEffect(() => {
@@ -490,20 +499,90 @@ export default function HomeScreen() {
             >
               {item.tasks.length === 0 ? (
                 <View style={{ paddingVertical: 4 }}>
-                  <EmptyState size="sm" message="No tasks scheduled" />
+                  {/* Empty State with Quick Add - Only for Today and Future */}
+                  {!item.isPast ? (
+                    <View style={{
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      paddingVertical: 24,
+                      paddingHorizontal: 16,
+                      gap: 16,
+                    }}>
+                      <Text style={{
+                        fontSize: 14,
+                        color: colors.textSub,
+                      }}>
+                        No tasks scheduled
+                      </Text>
+                      <Pressable
+                        onPress={() => handleQuickAdd(item.date)}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          backgroundColor: colors.primary,
+                          paddingHorizontal: 24,
+                          paddingVertical: 12,
+                          borderRadius: borderRadius.full,
+                          gap: 6,
+                        }}
+                      >
+                        <Plus size={16} color={colors.primaryForeground} strokeWidth={2.5} />
+                        <Text style={{
+                          fontSize: 16,
+                          color: colors.primaryForeground,
+                          fontWeight: '600',
+                        }}>
+                          Add Task
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <EmptyState size="sm" message="No tasks scheduled" />
+                  )}
                 </View>
               ) : (
-                item.tasks.map((task, index) => (
-                  <TaskItem
-                    key={`${task.id}-${index}`}
-                    task={task}
-                    isFuture={item.isFuture}
-                    isOverdue={task.isOverdue}
-                    daysOverdue={task.daysOverdue}
-                    sectionDate={item.date}
-                    onDateChange={handleDateChange}
-                  />
-                ))
+                <>
+                  {item.tasks.map((task, index) => (
+                    <TaskItem
+                      key={`${task.id}-${index}`}
+                      task={task}
+                      isFuture={item.isFuture}
+                      isOverdue={task.isOverdue}
+                      daysOverdue={task.daysOverdue}
+                      sectionDate={item.date}
+                      onDateChange={handleDateChange}
+                    />
+                  ))}
+                  {/* Footer - Quick Add Button (Only for Today and Future) */}
+                  {!item.isPast && (
+                    <Pressable
+                      onPress={() => handleQuickAdd(item.date)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        marginTop: 8,
+                        borderRadius: borderRadius.md,
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        borderColor: 'rgba(156, 163, 175, 0.2)', // border-muted-foreground/20
+                        borderStyle: 'dashed',
+                        gap: 6,
+                      }}
+                    >
+                      <Plus size={16} color={colors.textSub} strokeWidth={2} />
+                      <Text style={{
+                        fontSize: 14,
+                        color: colors.textSub,
+                        fontWeight: '500',
+                      }}>
+                        Add a task
+                      </Text>
+                    </Pressable>
+                  )}
+                </>
               )}
             </View>
           </Animated.View>
@@ -599,6 +678,15 @@ export default function HomeScreen() {
         />
       </View>
 
+      {/* Add Task Modal */}
+      <AddTaskModal
+        visible={isAddTaskModalVisible}
+        onClose={() => {
+          setIsAddTaskModalVisible(false);
+          setAddTaskInitialDate(undefined);
+        }}
+        initialDate={addTaskInitialDate}
+      />
     </SafeAreaView>
   );
 }
