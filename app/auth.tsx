@@ -1,32 +1,42 @@
+import { signIn, signUp, useAuth } from '@/lib/hooks/use-auth';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  ActivityIndicator,
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { signUp, signIn } from '@/lib/hooks/use-auth';
+import { showToast } from '@/utils/toast';
 
 export default function AuthScreen() {
   const router = useRouter();
+  const { user } = useAuth();
+  const { joinGroup } = useGroupStore();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleAuth = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showToast('error', 'Error', 'Please fill in all fields');
+      return;
+    }
+
+    if (isSignUp && !nickname.trim()) {
+      showToast('error', 'Error', 'Please enter a nickname');
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      showToast('error', 'Error', 'Password must be at least 6 characters');
       return;
     }
 
@@ -34,29 +44,49 @@ export default function AuthScreen() {
 
     try {
       if (isSignUp) {
-        const { data, error } = await signUp(email, password);
+        const { data, error } = await signUp(email, password, nickname);
         
         if (error) {
-          Alert.alert('Sign Up Failed', error.message);
+          showToast('error', 'Sign Up Failed', error.message);
         } else {
-          Alert.alert(
-            'Success!',
-            'Account created successfully. Please check your email to verify your account.',
-            [{ text: 'OK', onPress: () => setIsSignUp(false) }]
-          );
+          // If invite code is provided, try to join group
+          if (inviteCode.trim() && data?.user?.id) {
+            const { success, error: joinError } = await joinGroup(inviteCode.trim().toUpperCase(), data.user.id);
+            
+            if (success) {
+              showToast('success', 'Success!', 'Account created successfully. You have been automatically added to the group!');
+              setTimeout(() => {
+                setIsSignUp(false);
+                setInviteCode('');
+                router.replace('/(tabs)');
+              }, 2000);
+            } else {
+              showToast('info', 'Account Created', `Couldn't add you to the group: ${joinError || 'Invalid invite code'}. You can try joining later.`);
+              setTimeout(() => {
+                setIsSignUp(false);
+                setInviteCode('');
+              }, 2000);
+            }
+          } else {
+              showToast('success', 'Success!', 'Account created successfully. Please check your email to verify your account.');
+              setTimeout(() => {
+                setIsSignUp(false);
+                setNickname('');
+              }, 2000);
+          }
         }
       } else {
         const { data, error } = await signIn(email, password);
         
         if (error) {
-          Alert.alert('Sign In Failed', error.message);
+          showToast('error', 'Sign In Failed', error.message);
         } else {
           // Navigation will be handled by the auth state change listener
           router.replace('/(tabs)');
         }
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Something went wrong');
+      showToast('error', 'Error', error.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -113,6 +143,49 @@ export default function AuthScreen() {
               At least 6 characters
             </Text>
           </View>
+
+          {/* Nickname Input (Only for Sign Up) */}
+          {isSignUp && (
+            <View>
+              <Text className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Nickname
+              </Text>
+              <TextInput
+                className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-white"
+                placeholder="Enter your nickname"
+                placeholderTextColor="#9ca3af"
+                value={nickname}
+                onChangeText={setNickname}
+                maxLength={30}
+                editable={!loading}
+              />
+              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                This will be displayed in groups
+              </Text>
+            </View>
+          )}
+
+          {/* Invite Code Input (Only for Sign Up) */}
+          {isSignUp && (
+            <View>
+              <Text className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Invite Code <Text className="text-gray-400 text-xs">(Optional)</Text>
+              </Text>
+              <TextInput
+                className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl px-4 py-3 text-gray-900 dark:text-white uppercase"
+                placeholder="Enter invite code"
+                placeholderTextColor="#9ca3af"
+                value={inviteCode}
+                onChangeText={(text) => setInviteCode(text.toUpperCase().trim().slice(0, 6))}
+                autoCapitalize="characters"
+                maxLength={6}
+                editable={!loading}
+              />
+              <Text className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Enter the 6-digit code shared by the group owner
+              </Text>
+            </View>
+          )}
 
           {/* Submit Button */}
           <Pressable

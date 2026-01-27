@@ -1,38 +1,31 @@
 // AppHeader removed for modal presentation
-import { EmptyState } from '@/components/EmptyState';
-import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { AddTaskModal } from '@/components/AddTaskModal';
-import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
+import { AssigneeAvatars } from '@/components/AssigneeAvatars';
+import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
+import { EmptyState } from '@/components/EmptyState';
+import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
+import { isDateInWeeklyRange, getWeeklyCalendarRanges } from '@/constants/calendar';
+import { groupTasksByDate, getTasksForDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
 import { validateStateTransition } from '@/lib/api/task-state-machine';
-import { deleteTask, updateTask } from '@/lib/api/tasks';
+import { calculateTaskProgress } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
-import { useTimelineTasks } from '@/lib/hooks/use-timeline-tasks';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import type { TaskStatus, TaskWithRollover } from '@/lib/types';
+import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay, subDays } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Archive, ChevronLeft, ChevronRight, Clock, Package, Plus } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { Swipeable, TapGestureHandler, Gesture, GestureDetector, State } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Users } from 'lucide-react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { showToast } from '@/utils/toast';
 
-// Timeline task type (no ghost flag needed anymore)
-interface TimelineTask extends TaskWithRollover {
-  // Clean: no ghost logic
-}
-
-interface DayPage {
-  date: string; // yyyy-MM-dd
-  dateObj: Date;
-  displayDate: string; // "Jan 19 (Mon)" or "🔥 TODAY"
-  isToday: boolean;
-  isPast: boolean;
-  isFuture: boolean;
-  tasks: TimelineTask[];
-}
+// TaskWithOverdue is imported from task-filtering.ts
+// Use TaskWithOverdue instead of TimelineTask
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -41,183 +34,261 @@ const NAVIGATOR_HEIGHT = 0; // No navigator in modal
 const AVAILABLE_HEIGHT = SCREEN_HEIGHT; // Full height for modal
 
 export default function HomeScreen() {
-  const { tasks, isLoading, isError, error, refetch, isLoadingMore } = useTimelineTasks();
+  const { 
+    tasks, 
+    isLoading, 
+    error,
+    selectedDate,
+    setSelectedDate,
+    initializeCalendar,
+    updateTask: updateTaskInStore,
+    toggleTaskComplete: toggleTaskCompleteInStore,
+    deleteTask: deleteTaskInStore,
+  } = useCalendarStore();
   const { user } = useAuth();
+  const { fetchMyGroups } = useGroupStore();
   const router = useRouter();
   const flatListRef = useRef<FlatList>(null);
   const scrollViewRef = useRef<ScrollView>(null);
-  const params = useLocalSearchParams<{ jumpToDate?: string }>();
+  const params = useLocalSearchParams<{ jumpToDate?: string | string[] }>();
   const [refreshing, setRefreshing] = useState(false);
   const [isAddTaskModalVisible, setIsAddTaskModalVisible] = useState(false);
   const [addTaskInitialDate, setAddTaskInitialDate] = useState<string | undefined>(undefined);
   const isAtTop = useSharedValue(true); // Track if ScrollView is at top (shared value for gesture handler)
-
+  
+  // Initialize calendar on mount (skip if already initialized for faster modal opening)
+  useEffect(() => {
+    // Only initialize if not already initialized (calendar store is shared with weekly view)
+    const { isInitialized } = useCalendarStore.getState();
+    if (!isInitialized) {
+      initializeCalendar();
+    }
+  }, [initializeCalendar]);
+  
+  // Extract jumpToDateStr from params
+  const jumpToDateStr = useMemo(() => {
+    if (!params.jumpToDate) return undefined;
+    return Array.isArray(params.jumpToDate) ? params.jumpToDate[0] : params.jumpToDate;
+  }, [params.jumpToDate]);
+  
+  // Use weekly view range: -2 months ~ +4 months (same as weekly view)
+  const { pastLimit, futureLimit } = getWeeklyCalendarRanges();
+  
+  // Group tasks by date using Map (O(1) lookup) - same logic as weekly view
+  const tasksByDate = useMemo(() => groupTasksByDate(tasks), [tasks]);
+  
+  // Generate date string array for FlatList data (no page objects needed)
+  // Range: -2 months ~ +4 months (same as weekly view)
+  const dateStrings = useMemo(() => {
+    const today = startOfDay(new Date());
+    const startDate = pastLimit;
+    const endDate = futureLimit;
+    
+    const dates = eachDayOfInterval({ start: startDate, end: endDate })
+      .filter((date: Date) => isDateInWeeklyRange(date));
+    
+    return dates.map((date: Date) => format(date, 'yyyy-MM-dd'));
+  }, [pastLimit, futureLimit]);
+  
   // Drag to dismiss animation values
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
-  const startY = useSharedValue(0); // Store initial position
-  const DRAG_THRESHOLD = 100; // Minimum drag distance to dismiss
-
-  // Generate date pages: Today -7 to +7 (15 days total)
-  const generateDatePages = useCallback((): DayPage[] => {
-    const todayDate = startOfDay(new Date());
-    const todayStr = format(todayDate, 'yyyy-MM-dd');
-    
-    const startDate = subDays(todayDate, 7);
-    const endDate = addDays(todayDate, 7);
-    const dateRange = eachDayOfInterval({ start: startDate, end: endDate });
-
-    return dateRange.map((date) => {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      const isPast = date < todayDate;
-      const isToday = dateStr === todayStr;
-      const isFuture = date > todayDate;
-
-      const displayDate = format(date, 'MMM d (EEE)');
-
-      // Filter tasks for this date
-      const pageTasks: TimelineTask[] = [];
-
-      tasks.forEach((task) => {
-        // Simplified Grouping Logic (No Ghost Tasks)
-        // - DONE tasks: Group by completed_at (completion date)
-        // - TODO tasks (past): Move to TODAY only (no duplication in past)
-        // - TODO/CANCEL tasks (today/future): Show on due_date
-        
-        if (task.status === 'DONE') {
-          // ✅ DONE: Group by completion date in LOCAL TIME
-          if (!task.completed_at) return;
-          
-          const completedDate = parseISO(task.completed_at);
-          const completedDateStr = format(completedDate, 'yyyy-MM-dd');
-          
-          if (completedDateStr === dateStr) {
-            pageTasks.push(task);
-          }
-        } else {
-          // TODO or CANCEL: Group by due_date
-          if (!task.due_date) return;
-
-          const taskDate = parseISO(task.due_date);
-          const isTaskPast = taskDate < todayDate;
-
-          if (task.status === 'TODO' && isTaskPast) {
-            // ✅ Overdue TODO: Show ONLY in TODAY (no ghost in past)
-            if (isToday) {
-              pageTasks.push(task);
-            }
-          } else {
-            // ✅ Normal case: Show on due_date
-            if (task.due_date === dateStr) {
-              pageTasks.push(task);
-            }
-          }
-        }
-      });
-
-      // Sort tasks by date/time (maintain position when status changes)
-      if (isToday) {
-        pageTasks.sort((a, b) => {
-          // Sort by original due_date, then by time
-          const aDate = parseISO(a.original_due_date || a.due_date || a.created_at);
-          const bDate = parseISO(b.original_due_date || b.due_date || b.created_at);
-          
-          const timeDiff = aDate.getTime() - bDate.getTime();
-          if (timeDiff !== 0) return timeDiff;
-          
-          // If same date, sort by time
-          if (a.due_time && b.due_time) {
-            return a.due_time.localeCompare(b.due_time);
-          }
-          
-          // Finally by created_at
-          return a.created_at.localeCompare(b.created_at);
-        });
-      }
-
-      return {
-        date: dateStr,
-        dateObj: date,
-        displayDate,
-        isToday,
-        isPast,
-        isFuture,
-        tasks: pageTasks,
-      };
-    });
-  }, [tasks]);
-
-  const datePages = generateDatePages();
-  const initialDateIndex = useMemo(() => {
-    if (params.jumpToDate && datePages.length > 0) {
-      const foundIndex = datePages.findIndex(page => page.date === params.jumpToDate);
-      if (foundIndex !== -1) {
-        return foundIndex;
-      }
-    }
-    // Default: Today is at index 7 (0-based)
-    return 7;
-  }, [datePages, params.jumpToDate]);
+  const startY = useSharedValue(0);
+  const DRAG_THRESHOLD = 100;
   
-  const [currentDateIndex, setCurrentDateIndex] = useState(() => initialDateIndex);
-  const [currentDateDisplay, setCurrentDateDisplay] = useState(() => {
-    const initialPage = datePages[initialDateIndex];
-    return initialPage ? (initialPage.isToday ? `Today · ${initialPage.displayDate}` : initialPage.displayDate) : format(startOfDay(new Date()), 'MMM d (EEE)');
-  });
+  // Calculate target date index
+  const getTargetDateIndex = useCallback(() => {
+    if (dateStrings.length === 0) return 0;
+    
+    // Priority 1: jumpToDate param
+    if (jumpToDateStr) {
+      const index = dateStrings.indexOf(jumpToDateStr);
+      if (index !== -1) return index;
+    }
+    
+    // Priority 2: selectedDate
+    const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+    const index = dateStrings.indexOf(selectedDateStr);
+    if (index !== -1) return index;
+    
+    // Priority 3: Today
+    const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    const todayIndex = dateStrings.indexOf(todayStr);
+    if (todayIndex !== -1) return todayIndex;
+    
+    // Fallback: middle
+    return Math.floor(dateStrings.length / 2);
+  }, [dateStrings, selectedDate, jumpToDateStr]);
+  
+  const targetDateIndex = getTargetDateIndex();
+  
+  // Simple state
+  const [currentDateIndex, setCurrentDateIndex] = useState(0);
+  const [currentDateDisplay, setCurrentDateDisplay] = useState('');
+  const isUserSwipingRef = useRef(false);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const initialScrollIndexRef = useRef<number | undefined>(undefined);
+  
+  // Initialize on mount
+  useEffect(() => {
+    if (!hasInitialized && dateStrings.length > 0 && targetDateIndex >= 0) {
+      setHasInitialized(true);
+      initialScrollIndexRef.current = targetDateIndex;
+      setCurrentDateIndex(targetDateIndex);
+      const dateStr = dateStrings[targetDateIndex];
+      const date = parseISO(dateStr);
+      const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+      const isToday = dateStr === todayStr;
+      setCurrentDateDisplay(isToday 
+        ? `Today · ${format(date, 'MMM d (EEE)')}` 
+        : format(date, 'MMM d (EEE)'));
+    }
+  }, [hasInitialized, dateStrings.length, targetDateIndex, dateStrings]);
+  
+  // Handle jumpToDate param changes
+  useEffect(() => {
+    if (isUserSwipingRef.current || !jumpToDateStr || dateStrings.length === 0) return;
+    
+    const targetIndex = dateStrings.indexOf(jumpToDateStr);
+    if (targetIndex !== -1 && targetIndex !== currentDateIndex) {
+      setCurrentDateIndex(targetIndex);
+      const date = parseISO(jumpToDateStr);
+      const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+      const isToday = jumpToDateStr === todayStr;
+      setCurrentDateDisplay(isToday 
+        ? `Today · ${format(date, 'MMM d (EEE)')}` 
+        : format(date, 'MMM d (EEE)'));
+      
+      setTimeout(() => {
+        flatListRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: true,
+        });
+      }, 100);
+    }
+  }, [jumpToDateStr, dateStrings, currentDateIndex]);
 
-  // No need for auto-scroll useEffect - initialScrollIndex handles it
-
-  // Track current visible page
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    if (viewableItems.length > 0) {
-      const visibleItem = viewableItems[0];
-      const index = visibleItem.index || 0;
-      setCurrentDateIndex(index);
-      const page = datePages[index] as DayPage | undefined;
-      if (page) {
-        setCurrentDateDisplay(page.isToday ? `Today · ${page.displayDate}` : page.displayDate);
-      } else {
-        setCurrentDateDisplay('');
+  // Track current visible page and update selectedDate
+  const previousDateIndexRef = useRef<number>(-1);
+  
+  // Store dateStrings, setCurrentDateIndex, setCurrentDateDisplay in refs for stable callback
+  const dateStringsRef = useRef(dateStrings);
+  const setCurrentDateIndexRef = useRef(setCurrentDateIndex);
+  const setCurrentDateDisplayRef = useRef(setCurrentDateDisplay);
+  const setSelectedDateRef = useRef(setSelectedDate);
+  const flatListRefForCallback = useRef(flatListRef.current);
+  
+  // Update refs when values change
+  useEffect(() => {
+    dateStringsRef.current = dateStrings;
+    setCurrentDateIndexRef.current = setCurrentDateIndex;
+    setCurrentDateDisplayRef.current = setCurrentDateDisplay;
+    setSelectedDateRef.current = setSelectedDate;
+    flatListRefForCallback.current = flatListRef.current;
+  }, [dateStrings, setCurrentDateIndex, setCurrentDateDisplay, setSelectedDate]);
+  
+  // SIMPLIFIED: Handle viewable items change (user swipe)
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    if (viewableItems.length === 0) return;
+    
+    const visibleItem = viewableItems[0];
+    const index = visibleItem.index || 0;
+    const prevIndex = previousDateIndexRef.current;
+    
+    // Skip if index hasn't changed
+    if (index === prevIndex) return;
+    
+    const dateStr = dateStringsRef.current[index];
+    if (!dateStr) return;
+    
+    const date = parseISO(dateStr);
+    const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    const isTodayPage = dateStr === todayStr;
+    
+    // Update local state using refs
+    if (setCurrentDateIndexRef.current) {
+      setCurrentDateIndexRef.current(index);
+    }
+    if (setCurrentDateDisplayRef.current) {
+      setCurrentDateDisplayRef.current(isTodayPage 
+        ? `Today · ${format(date, 'MMM d (EEE)')}` 
+        : format(date, 'MMM d (EEE)'));
+    }
+    
+    // Mark as user swipe and update selectedDate
+    isUserSwipingRef.current = true;
+    if (setSelectedDateRef.current) {
+      setSelectedDateRef.current(date);
+    }
+    
+    // Reset flag after delay
+    setTimeout(() => {
+      isUserSwipingRef.current = false;
+    }, 300);
+    
+    // Check swipe limits (-2 months ~ +4 months)
+    if (prevIndex !== -1) {
+      const swipeDirection = index > prevIndex ? 'next' : 'prev';
+      const checkDate = swipeDirection === 'prev' 
+        ? addDays(date, -1)
+        : addDays(date, 1);
+      
+      if (!isDateInWeeklyRange(checkDate)) {
+        showToast('info', '범위 제한', '최대로 이동하였습니다.');
+        setTimeout(() => {
+          flatListRefForCallback.current?.scrollToIndex({
+            index: prevIndex,
+            animated: true,
+          });
+        }, 100);
+        return;
       }
     }
-  }).current;
+    
+    previousDateIndexRef.current = index;
+  }, []); // Empty dependency array - use refs for all dynamic values
 
-  const viewabilityConfig = {
+  // Memoize viewabilityConfig to prevent recreation
+  const viewabilityConfig = useMemo(() => ({
     itemVisiblePercentThreshold: 50,
-  };
+  }), []);
 
-  // Navigation functions
+  // Navigation functions with range checks
   const goToPreviousDay = useCallback(() => {
     if (currentDateIndex > 0) {
-      flatListRef.current?.scrollToIndex({
-        index: currentDateIndex - 1,
-        animated: true,
-      });
+      const prevIndex = currentDateIndex - 1;
+      const prevDateStr = dateStrings[prevIndex];
+      if (prevDateStr && isDateInWeeklyRange(parseISO(prevDateStr))) {
+        flatListRef.current?.scrollToIndex({
+          index: prevIndex,
+          animated: true,
+        });
+      } else {
+        showToast('info', '범위 제한', '최대로 이동하였습니다.');
+      }
     }
-  }, [currentDateIndex]);
+  }, [currentDateIndex, dateStrings]);
 
   const goToNextDay = useCallback(() => {
-    if (currentDateIndex < datePages.length - 1) {
-      flatListRef.current?.scrollToIndex({
-        index: currentDateIndex + 1,
-        animated: true,
-      });
+    if (currentDateIndex < dateStrings.length - 1) {
+      const nextIndex = currentDateIndex + 1;
+      const nextDateStr = dateStrings[nextIndex];
+      if (nextDateStr && isDateInWeeklyRange(parseISO(nextDateStr))) {
+        flatListRef.current?.scrollToIndex({
+          index: nextIndex,
+          animated: true,
+        });
+      } else {
+        showToast('info', '범위 제한', '최대로 이동하였습니다.');
+      }
     }
-  }, [currentDateIndex, datePages.length]);
-
-  // Navigate to specific date
-  const goToDate = useCallback((dateStr: string) => {
-    const targetIndex = datePages.findIndex(page => page.date === dateStr);
-    if (targetIndex !== -1) {
-      flatListRef.current?.scrollToIndex({
-        index: targetIndex,
-        animated: true,
-      });
-    }
-  }, [datePages]);
+  }, [currentDateIndex, dateStrings]);
 
   // Handle quick add task
   const handleQuickAdd = useCallback((dateStr: string) => {
+    if (Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
     setAddTaskInitialDate(dateStr);
     setIsAddTaskModalVisible(true);
   }, []);
@@ -239,22 +310,22 @@ export default function HomeScreen() {
   }, [goToPreviousDay, goToNextDay]);
 
   const handleNotificationPress = () => {
-    Alert.alert('Notifications', 'Notification feature coming soon!');
+    showToast('info', 'Notifications', 'Notification feature coming soon!');
   };
 
   // Pull-to-Refresh handler
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refetch();
+    await initializeCalendar();
     setRefreshing(false);
-  }, [refetch]);
+  }, [initializeCalendar]);
 
   // Auto-refresh on focus (silent update)
   useFocusEffect(
     useCallback(() => {
-      // Silently refetch when screen comes into focus
-      refetch();
-    }, [refetch])
+      // Silently refresh when screen comes into focus
+      initializeCalendar();
+    }, [initializeCalendar])
   );
 
   // Dismiss modal (go back to previous screen)
@@ -339,16 +410,44 @@ export default function HomeScreen() {
     isAtTop.value = offsetY <= 0;
   }, [isAtTop]);
 
-  const currentPage = datePages[currentDateIndex] as DayPage | undefined;
-  const daySubtitle = '';
-
-  const renderDayPage = ({ item }: { item: DayPage }) => {
+  // Get current date string
+  const currentDateStr = dateStrings[currentDateIndex] || '';
+  const currentDate = currentDateStr ? parseISO(currentDateStr) : startOfDay(new Date());
+  const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+  const isToday = currentDateStr === todayStr;
+  
+  // Go to today function
+  const goToToday = useCallback(() => {
+    const todayIndex = dateStrings.indexOf(todayStr);
+    if (todayIndex !== -1) {
+      flatListRef.current?.scrollToIndex({
+        index: todayIndex,
+        animated: true,
+      });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+  }, [dateStrings, todayStr]);
+  
+  // Render day page: item is date string (yyyy-MM-dd)
+  const renderDayPage = ({ item: dateStr }: { item: string }) => {
     const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
-    const isToday = item.isToday;
+    const date = parseISO(dateStr);
+    const isTodayPage = dateStr === todayStr;
+    const isPast = date < startOfDay(new Date());
+    const isFuture = date > startOfDay(new Date());
+    
+    // Get tasks for this date from Map (O(1) lookup)
+    const dayTasks = getTasksForDate(tasksByDate, dateStr);
     
     // Navigate to specific date handler
-    const handleDateChange = (dateStr: string) => {
-      goToDate(dateStr);
+    const handleDateChange = (targetDateStr: string) => {
+      const targetIndex = dateStrings.indexOf(targetDateStr);
+      if (targetIndex !== -1) {
+        flatListRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: true,
+        });
+      }
     };
     
     const containerContent = (
@@ -413,6 +512,8 @@ export default function HomeScreen() {
             showsVerticalScrollIndicator={Platform.OS === 'web'}
             scrollEnabled={true}
             bounces={true}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled={true}
             onScroll={handleScroll}
             scrollEventThrottle={16}
             refreshControl={
@@ -427,8 +528,8 @@ export default function HomeScreen() {
           {/* Main Card Container - Fit Content */}
           <Animated.View
             style={[
-              styles.dayCard,
-              isToday && styles.dayCardToday,
+              styles.dayCard as any,
+              isToday && (styles.dayCardToday as any),
               isToday && { backgroundColor: '#EFF6FF' }, // Very light blue for today
               { 
                 ...(Platform.OS === 'web' 
@@ -437,7 +538,7 @@ export default function HomeScreen() {
                 marginBottom: 16, // Add bottom margin
               },
             ]}
-            sharedTransitionTag={`day-card-${item.date}`}
+            {...(Platform.OS !== 'web' ? { sharedTransitionTag: `day-card-${dateStr}` } : {})}
           >
             {/* Card Header - Date Display */}
             <View
@@ -447,42 +548,96 @@ export default function HomeScreen() {
                   paddingTop: 16,
                   paddingBottom: 12,
                 },
-                isToday && { backgroundColor: '#EFF6FF' }, // Light blue header for today
+                isTodayPage && { backgroundColor: '#EFF6FF' }, // Light blue header for today
               ]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                {/* Date Text */}
-                <Text
-                  style={{
-                    fontSize: 18,
-                    fontWeight: '600',
-                    color: isToday ? colors.primary : colors.textMain,
-                  }}
-                >
-                  {item.displayDate}
-                </Text>
+                {/* Date Text and Today Button */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Text
+                    style={{
+                      fontSize: 18,
+                      fontWeight: '600',
+                      color: isTodayPage ? colors.primary : colors.textMain,
+                    }}
+                  >
+                    {isTodayPage ? `Today · ${format(date, 'MMM d (EEE)')}` : format(date, 'MMM d (EEE)')}
+                  </Text>
+                  {/* Show "Today" button for past/future dates */}
+                  {!isTodayPage && (
+                    <Pressable
+                      onPress={goToToday}
+                      style={{
+                        backgroundColor: colors.primary,
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: borderRadius.md,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: colors.primaryForeground }}>
+                        Today
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
 
                 {/* Navigation Arrows */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Pressable
-                    onPress={goToPreviousDay}
+                    onPress={() => {
+                      const prevIndex = currentDateIndex - 1;
+                      if (prevIndex >= 0) {
+                        const prevDateStr = dateStrings[prevIndex];
+                        if (prevDateStr && isDateInWeeklyRange(parseISO(prevDateStr))) {
+                          flatListRef.current?.scrollToIndex({
+                            index: prevIndex,
+                            animated: true,
+                          });
+                        } else {
+                          showToast('info', '범위 제한', '최대로 이동하였습니다.');
+                        }
+                      }
+                    }}
                     disabled={currentDateIndex === 0}
                     style={{ 
-                      padding: 8,
+                      padding: 12,
                       opacity: currentDateIndex === 0 ? 0.3 : 1,
+                      minWidth: 44,
+                      minHeight: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                    pressRetentionOffset={{ top: 30, bottom: 30, left: 30, right: 30 }}
                   >
                     <ChevronLeft size={20} color={colors.textSub} strokeWidth={2} />
                   </Pressable>
                   <Pressable
-                    onPress={goToNextDay}
-                    disabled={currentDateIndex === datePages.length - 1}
-                    style={{ 
-                      padding: 8,
-                      opacity: currentDateIndex === datePages.length - 1 ? 0.3 : 1,
+                    onPress={() => {
+                      const nextIndex = currentDateIndex + 1;
+                      if (nextIndex < dateStrings.length) {
+                        const nextDateStr = dateStrings[nextIndex];
+                        if (nextDateStr && isDateInWeeklyRange(parseISO(nextDateStr))) {
+                          flatListRef.current?.scrollToIndex({
+                            index: nextIndex,
+                            animated: true,
+                          });
+                        } else {
+                          showToast('info', '범위 제한', '최대로 이동하였습니다.');
+                        }
+                      }
                     }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    disabled={currentDateIndex === dateStrings.length - 1}
+                    style={{ 
+                      padding: 12,
+                      opacity: currentDateIndex === dateStrings.length - 1 ? 0.3 : 1,
+                      minWidth: 44,
+                      minHeight: 44,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                    hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                    pressRetentionOffset={{ top: 30, bottom: 30, left: 30, right: 30 }}
                   >
                     <ChevronRight size={20} color={colors.textSub} strokeWidth={2} />
                   </Pressable>
@@ -490,17 +645,17 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            {/* Card Body - Task List (No Scroll, Fit Content) */}
+            {/* Card Body - Task List */}
             <View
               style={{
                 paddingHorizontal: 16,
                 paddingVertical: 16,
               }}
             >
-              {item.tasks.length === 0 ? (
+              {dayTasks.length === 0 ? (
                 <View style={{ paddingVertical: 4 }}>
                   {/* Empty State with Quick Add - Only for Today and Future */}
-                  {!item.isPast ? (
+                  {!isPast ? (
                     <View style={{
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -515,7 +670,7 @@ export default function HomeScreen() {
                         No tasks scheduled
                       </Text>
                       <Pressable
-                        onPress={() => handleQuickAdd(item.date)}
+                        onPress={() => handleQuickAdd(dateStr)}
                         style={{
                           flexDirection: 'row',
                           alignItems: 'center',
@@ -542,21 +697,24 @@ export default function HomeScreen() {
                 </View>
               ) : (
                 <>
-                  {item.tasks.map((task, index) => (
-                    <TaskItem
+                  {dayTasks.map((task, index) => (
+                    <MemoizedTaskItem
                       key={`${task.id}-${index}`}
                       task={task}
-                      isFuture={item.isFuture}
-                      isOverdue={task.isOverdue}
-                      daysOverdue={task.daysOverdue}
-                      sectionDate={item.date}
+                      isFuture={isFuture}
+                      isOverdue={task.isOverdue || false}
+                      daysOverdue={task.daysOverdue || 0}
+                      sectionDate={dateStr}
                       onDateChange={handleDateChange}
+                      updateTaskInStore={updateTaskInStore}
+                      toggleTaskCompleteInStore={toggleTaskCompleteInStore}
+                      deleteTaskInStore={deleteTaskInStore}
                     />
                   ))}
                   {/* Footer - Quick Add Button (Only for Today and Future) */}
-                  {!item.isPast && (
+                  {!isPast && (
                     <Pressable
-                      onPress={() => handleQuickAdd(item.date)}
+                      onPress={() => handleQuickAdd(dateStr)}
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
@@ -567,7 +725,7 @@ export default function HomeScreen() {
                         borderRadius: borderRadius.md,
                         backgroundColor: 'transparent',
                         borderWidth: 2,
-                        borderColor: 'rgba(156, 163, 175, 0.2)', // border-muted-foreground/20
+                        borderColor: 'rgba(156, 163, 175, 0.2)',
                         borderStyle: 'dashed',
                         gap: 6,
                       }}
@@ -602,12 +760,15 @@ export default function HomeScreen() {
     );
   };
 
+  // Check if there's an error
+  const isError = !!error;
+
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View className="flex-1 items-center justify-center">
+      <SafeAreaView style={styles.container as any}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.textSub, { marginTop: 16 }]}>
+          <Text style={[styles.textSub as any, { marginTop: 16 }]}>
             Loading tasks...
           </Text>
         </View>
@@ -617,21 +778,20 @@ export default function HomeScreen() {
 
   if (isError) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-4xl mb-4">⚠️</Text>
-          <Text style={[styles.textMain, { fontSize: 16, fontWeight: '600', marginBottom: 8 }]}>
+      <SafeAreaView style={styles.container as any}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontSize: 32, marginBottom: 16 }}>⚠️</Text>
+          <Text style={[styles.textMain as any, { fontSize: 16, fontWeight: '600', marginBottom: 8 }]}>
             Failed to load tasks
           </Text>
-          <Text style={[styles.textSub, { textAlign: 'center', marginBottom: 16 }]}>
-            {error?.message || 'Something went wrong'}
+          <Text style={[styles.textSub as any, { textAlign: 'center', marginBottom: 16 }]}>
+            {error || 'Something went wrong'}
           </Text>
           <Pressable 
-            onPress={() => refetch()}
-            style={styles.primaryButton}
-            className="active:opacity-70"
+            onPress={() => initializeCalendar()}
+            style={styles.primaryButton as any}
           >
-            <Text className="text-white font-semibold">Try Again</Text>
+            <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Try Again</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -639,7 +799,10 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[
+      styles.container as any,
+      Platform.OS === 'web' && { minHeight: '100vh' as any }
+    ]}>
       {/* Horizontal Day Paging View */}
       <View 
         style={{
@@ -650,9 +813,9 @@ export default function HomeScreen() {
       >
         <FlatList
           ref={flatListRef}
-          data={datePages}
+          data={dateStrings}
           renderItem={renderDayPage}
-          keyExtractor={(item) => item.date}
+          keyExtractor={(item) => item}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
@@ -666,8 +829,9 @@ export default function HomeScreen() {
             offset: (Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH) * index,
             index,
           })}
-          initialScrollIndex={initialDateIndex}
+          initialScrollIndex={initialScrollIndexRef.current}
           onScrollToIndexFailed={(info) => {
+            // Retry scrolling after a delay
             setTimeout(() => {
               flatListRef.current?.scrollToIndex({
                 index: info.index,
@@ -675,6 +839,12 @@ export default function HomeScreen() {
               });
             }, 100);
           }}
+          // Performance optimizations for large datasets (180+ days)
+          initialNumToRender={3} // Only render 3 items initially (default is 10) - faster first paint
+          maxToRenderPerBatch={2} // Render 2 items per batch (default is 10) - smoother scrolling
+          windowSize={5} // Render 5 screens worth of items (default is 21) - reduces initial render
+          removeClippedSubviews={Platform.OS !== 'web'} // Remove off-screen views (better memory usage)
+          updateCellsBatchingPeriod={50} // Batch updates every 50ms (default is 50)
         />
       </View>
 
@@ -699,33 +869,84 @@ function TaskItem({
   daysOverdue = 0,
   sectionDate,
   onDateChange,
+  updateTaskInStore,
+  toggleTaskCompleteInStore,
+  deleteTaskInStore,
 }: { 
-  task: TimelineTask; 
+  task: TaskWithOverdue; 
   isFuture: boolean;
   isOverdue: boolean;
   daysOverdue: number;
   sectionDate: string; // yyyy-MM-dd
   onDateChange?: (dateStr: string) => void;
+  updateTaskInStore: (taskId: string, updateFields: any) => Promise<{ success: boolean; error?: string }>;
+  toggleTaskCompleteInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+  deleteTaskInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
 }) {
   const queryClient = useQueryClient();
-  const isCancelled = task.status === 'CANCEL';
-  const isDone = task.status === 'DONE';
-  const isTodo = task.status === 'TODO';
+  const { user } = useAuth();
+  const { groups } = useGroupStore();
   
-  // ✅ TIMEZONE-SAFE: Calculate late completion (completed_at > due_date)
+  // Edit sheet state (must be at top level for React Hooks rules)
+  const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
+  
+  // Create groups map for O(1) lookup instead of O(n) find operations
+  const groupsMap = useMemo(() => {
+    const map = new Map<string, typeof groups[0]>();
+    groups.forEach(g => map.set(g.id, g));
+    return map;
+  }, [groups]);
+  
+  // Memoize expensive calculations
+  const isCancelled = useMemo(() => task.status === 'CANCEL', [task.status]);
+  const isDone = useMemo(() => task.status === 'DONE', [task.status]);
+  const isTodo = useMemo(() => task.status === 'TODO', [task.status]);
+  
+  // Check if this is my task or someone else's (memoized)
+  const isMyTask = useMemo(
+    () => task.assignees?.some((a: any) => a.user_id === user?.id) || false,
+    [task.assignees, user?.id]
+  );
+  const isGroupTask = useMemo(() => task.group_id !== null, [task.group_id]);
+  
+  // Get group name (memoized to avoid repeated find operations, using Map for O(1) lookup)
+  const groupName = useMemo(() => {
+    if (!isGroupTask || !task.group_id) return null;
+    return groupsMap.get(task.group_id)?.name || null;
+  }, [isGroupTask, task.group_id, groupsMap]);
+  
+  // Get group for role checking (memoized)
+  const myGroup = useMemo(() => {
+    if (!isGroupTask || !task.group_id) return null;
+    return groupsMap.get(task.group_id) || null;
+  }, [isGroupTask, task.group_id, groupsMap]);
+  
+  // Calculate progress for group tasks (memoized)
+  const progress = useMemo(() => {
+    if (!isGroupTask || !task.assignees || task.assignees.length === 0) return null;
+    return calculateTaskProgress(task, user?.id);
+  }, [isGroupTask, task.assignees, task, user?.id]);
+  
+  // Group task logic handled below
+  
+  // ✅ TIMEZONE-SAFE: Calculate late completion (completed_at > due_date or original_due_date)
   // Uses local time for both dates to ensure accurate day difference
-  const isLateCompletion = isDone && task.completed_at && task.due_date 
-    ? (() => {
-        // Parse UTC timestamp and convert to local date
-        const completedDate = parseISO(task.completed_at); // UTC -> Local
-        // Parse date-only string (no timezone conversion needed)
-        const dueDate = parseISO(task.due_date);
-        
-        // differenceInCalendarDays compares calendar dates (ignores time)
-        const daysLate = differenceInCalendarDays(completedDate, dueDate);
-        return daysLate > 0 ? daysLate : 0;
-      })()
-    : 0;
+  // Use original_due_date if available (for backlog tasks), otherwise use due_date
+  // Memoized to avoid recalculation on every render
+  const isLateCompletion = useMemo(() => {
+    if (!isDone || !task.completed_at) return 0;
+    const referenceDueDate = task.original_due_date || task.due_date;
+    if (!referenceDueDate) return 0;
+    
+    // Parse UTC timestamp and convert to local date
+    const completedDate = parseISO(task.completed_at); // UTC -> Local
+    // Parse date-only string (no timezone conversion needed)
+    const dueDate = parseISO(referenceDueDate);
+    
+    // differenceInCalendarDays compares calendar dates (ignores time)
+    const daysLate = differenceInCalendarDays(completedDate, dueDate);
+    return daysLate > 0 ? daysLate : 0;
+  }, [isDone, task.completed_at, task.original_due_date, task.due_date]);
   
   // Format time from HH:MM:SS to HH:MM
   const formatTime = (time: string | null) => {
@@ -738,16 +959,199 @@ function TaskItem({
     const validation = validateStateTransition(task.status, targetStatus);
     
     if (!validation.valid) {
-      if (Platform.OS === 'web') {
-        alert(validation.error);
-      } else {
-        Alert.alert('Invalid Action', validation.error);
+      showToast('error', 'Invalid Action', validation.error);
+      return;
+    }
+
+    // Optimistic update helper
+    const updateTaskInCache = (oldData: any, updateFn: (t: any) => any) => {
+      if (!oldData) return oldData;
+      return oldData.map((t: any) => t.id === task.id ? updateFn(t) : t);
+    };
+
+    // Group task: use assignee logic
+    if (task.group_id && task.assignees) {
+      const myGroup = groups.find(g => g.id === task.group_id);
+      const myRole = myGroup?.myRole;
+      const shouldComplete = targetStatus === 'DONE';
+
+      if (myRole === 'OWNER' || myRole === 'ADMIN') {
+        // Owner and Admin: toggle all assignees (checkbox controls all)
+        
+        // Store original task for rollback
+        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+        const originalTask = useCalendarStore.getState().getTaskById(task.id);
+        
+        // Optimistically update React Query cache
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
+            ...t,
+            assignees: t.assignees?.map((a: any) => ({
+              ...a,
+              is_completed: shouldComplete,
+              completed_at: shouldComplete ? new Date().toISOString() : null,
+            })),
+            status: targetStatus,
+            completed_at: shouldComplete ? new Date().toISOString() : null,
+          }))
+        );
+
+        // Optimistically update Calendar Store (for immediate UI update)
+        if (originalTask) {
+          const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+          const updatedAssignees = originalTask.assignees?.map((a: any) => ({
+            ...a,
+            is_completed: shouldComplete,
+            completed_at: shouldComplete ? new Date().toISOString() : null,
+          })) || [];
+          
+          const optimisticTask = {
+            ...originalTask,
+            assignees: updatedAssignees, // Order preserved
+            status: targetStatus,
+            completed_at: shouldComplete ? new Date().toISOString() : null,
+          };
+          
+          const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
+          useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+        }
+
+        try {
+          const { toggleAllAssigneesCompletion, getTaskById } = await import('@/lib/api/tasks');
+          const { error } = await toggleAllAssigneesCompletion(task.id, shouldComplete);
+          
+          if (error) {
+            console.error('[day.tsx] ❌ API call failed:', error);
+            // Rollback on error
+            if (originalTask) {
+              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+              const tasksWithRollover = calculateRolloverInfo([originalTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          } else {
+            // Fetch updated task and update store with server response
+            const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
+            if (!fetchError && updatedTask) {
+              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+              const tasksWithRollover = calculateRolloverInfo([updatedTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+          }
+        } catch (error) {
+          console.error('[day.tsx] ❌ Exception:', error);
+          // Rollback on exception
+          if (originalTask) {
+            const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+            const tasksWithRollover = calculateRolloverInfo([originalTask]);
+            useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+          }
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+        }
+      } else if (user) {
+        // Member: toggle own status only
+        const myAssignee = task.assignees.find((a: any) => a.user_id === user.id);
+        if (!myAssignee) return;
+
+        const shouldCompleteMyTask = !myAssignee.is_completed;
+
+        // Store original task for rollback
+        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+        const originalTask = useCalendarStore.getState().getTaskById(task.id);
+
+        // Optimistically update React Query cache
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          (oldData: any) => updateTaskInCache(oldData, (t: any) => {
+            const updatedAssignees = t.assignees?.map((a: any) =>
+              a.user_id === user.id
+                ? { ...a, is_completed: shouldCompleteMyTask, completed_at: shouldCompleteMyTask ? new Date().toISOString() : null }
+                : a
+            );
+            const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
+            
+            return {
+              ...t,
+              assignees: updatedAssignees,
+              status: allCompleted ? 'DONE' : 'TODO',
+              completed_at: allCompleted ? new Date().toISOString() : null,
+            };
+          })
+        );
+
+        // Optimistically update Calendar Store (for immediate UI update)
+        if (originalTask) {
+          const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+          const updatedAssignees = originalTask.assignees?.map((a: any) =>
+            a.user_id === user.id
+              ? { ...a, is_completed: shouldCompleteMyTask, completed_at: shouldCompleteMyTask ? new Date().toISOString() : null }
+              : a
+          ) || [];
+          
+          const allCompleted = updatedAssignees.every((a: any) => a.is_completed) ?? false;
+          
+          const optimisticTask: TaskWithRollover = {
+            ...originalTask,
+            assignees: updatedAssignees, // Order preserved
+            status: (allCompleted ? 'DONE' : 'TODO') as TaskStatus,
+            completed_at: allCompleted ? new Date().toISOString() : null,
+          } as TaskWithRollover;
+          
+          const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
+          useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+        }
+
+        try {
+          const { toggleAssigneeCompletion, getTaskById } = await import('@/lib/api/tasks');
+          const { error } = await toggleAssigneeCompletion(
+            task.id,
+            user.id,
+            myAssignee.is_completed
+          );
+          if (error) {
+            console.error('Error toggling assignee:', error);
+            // Rollback on error
+            if (originalTask) {
+              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+              const tasksWithRollover = calculateRolloverInfo([originalTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          } else {
+            // Fetch updated task and update store with server response
+            const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
+            if (!fetchError && updatedTask) {
+              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+              const tasksWithRollover = calculateRolloverInfo([updatedTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+          }
+        } catch (error) {
+          console.error('Exception toggling assignee:', error);
+          // Rollback on exception
+          if (originalTask) {
+            const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+            const tasksWithRollover = calculateRolloverInfo([originalTask]);
+            useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+          }
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+        }
       }
       return;
     }
 
-    // Prepare updates
+    // Personal task: Use store function for optimistic update
     const updates: any = { status: targetStatus };
+
+    if (targetStatus === 'DONE') {
+      // Complete: Set completed_at to today (actual completion date)
+      // This allows delay calculation: completed_at - due_date = delay days
+      updates.completed_at = new Date().toISOString();
+    } else {
+      // Uncomplete: Clear completed_at
+      updates.completed_at = null;
+    }
 
     // If unchecking (DONE -> TODO) and task has no due_date, assign today's date
     if (targetStatus === 'TODO' && !task.due_date) {
@@ -756,8 +1160,8 @@ function TaskItem({
       updates.original_due_date = todayStr;
     }
 
-    await updateTask({ id: task.id, ...updates });
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
+    // Use store function (handles optimistic update and API call)
+    await updateTaskInStore(task.id, updates);
   };
 
   // Handle Checkbox Tap
@@ -775,258 +1179,303 @@ function TaskItem({
   };
 
   // Handle Title Press - Open Edit Sheet
-  const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
-  
-  const handleTitlePress = () => {
+  const handleTitlePress = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
     setIsEditSheetVisible(true);
-  };
+  }, []);
 
-  const handleTaskUpdate = () => {
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-  };
+  const handleTaskUpdate = useCallback(() => {
+    // Store already updated via optimistic updates, no need to invalidate
+    // This callback can be removed or kept for future use
+  }, []);
+
+  // Memoize task prop to prevent unnecessary re-renders
+  const editTaskData = useMemo(() => ({
+    id: task.id,
+    title: task.title,
+    due_date: task.due_date,
+    due_time: task.due_time,
+    group_id: task.group_id || null,
+    assignees: task.assignees?.map((a: any) => ({
+      user_id: a.user_id,
+      profile: a.profile,
+    })) || [],
+    status: task.status,
+  }), [task.id, task.title, task.due_date, task.due_time, task.group_id, task.assignees, task.status]);
 
   // Send to Backlog (remove due_date)
   const handleSendToBacklog = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     
-    // Update task: set due_date to null
-    await updateTask({ 
-      id: task.id, 
+    // Use store function (handles optimistic update and API call)
+    const result = await updateTaskInStore(task.id, {
       due_date: null,
       original_due_date: null,
     });
     
-    // Invalidate queries to refresh UI
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-    
-    // Show toast message
-    if (Platform.OS === 'web') {
-      alert('Task moved to Backlog');
-    } else {
-      Alert.alert('Moved', 'Task moved to Backlog');
+    if (result.success) {
+      showToast('success', 'Moved', 'Task moved to Backlog');
     }
   };
-
-  // Render left swipe action (Archive - Send to Backlog)
-  const renderLeftActions = () => (
-    <View
-      style={{
-        width: 70,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: colors.textSub,
-        borderTopLeftRadius: borderRadius.lg,
-        borderBottomLeftRadius: borderRadius.lg,
-      }}
-    >
-      <Archive size={20} color="#FFFFFF" strokeWidth={2} />
-    </View>
-  );
 
   // Render task item
-  const tapRef = useRef(null);
-
-  const onCheckboxTap = (event: any) => {
-    if (event.nativeEvent.state === State.END) {
-      handleCheckboxPress();
-    }
-  };
-
   return (
+    <>
     <View
       style={[
-        styles.card,
-        isOverdue && isTodo && styles.cardOverdue,
+        styles.card as any,
+        isOverdue && isTodo && (styles.cardOverdue as any),
         isDone && { backgroundColor: '#F8FAFC' }, // Completed task background
       ]}
     >
-      <Swipeable
-        renderLeftActions={isTodo ? renderLeftActions : undefined}
-        onSwipeableOpen={() => handleSendToBacklog()}
-        overshootLeft={false}
-        enabled={isTodo} // Only enable swipe for TODO tasks
-      >
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 12 }}>
+      <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 12 }}>
+          {/* 첫 번째 줄: 체크박스 + 제목 + 시간뱃지 + delay뱃지 */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
             {/* Checkbox */}
-            <TapGestureHandler
-              ref={tapRef}
-              onHandlerStateChange={onCheckboxTap}
-              maxDist={10}
-            >
-              <View 
-                style={[
-                  {
-                    width: 20,
-                    height: 20,
-                    borderRadius: borderRadius.full,
-                    borderWidth: 2,
-                    flexShrink: 0,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  },
-                  isDone && {
-                    backgroundColor: colors.success,
-                    borderColor: colors.success,
-                  },
-                  isCancelled && {
-                    backgroundColor: colors.gray300,
-                    borderColor: colors.gray300,
-                  },
-                  !isDone && !isCancelled && {
-                    borderColor: colors.gray300,
-                  },
-                ]}
-              >
-                {isDone && (
-                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>✓</Text>
-                )}
-                {isCancelled && (
-                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>✕</Text>
-                )}
-              </View>
-            </TapGestureHandler>
+            {(() => {
+              // Check if MEMBER should have read-only checkbox
+              const isCheckboxDisabled = !!(task.group_id && myGroup?.myRole === 'MEMBER');
+              
+              return (
+                <Pressable
+                  onPress={handleCheckboxPress}
+                  disabled={isCheckboxDisabled}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                  style={[
+                    {
+                      width: 24,
+                      height: 24,
+                      borderRadius: borderRadius.full,
+                      borderWidth: 2,
+                      flexShrink: 0,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginTop: 2, // Align with text baseline
+                    },
+                    isDone && {
+                      backgroundColor: colors.success,
+                      borderColor: colors.success,
+                    },
+                    isCancelled && {
+                      backgroundColor: colors.gray300,
+                      borderColor: colors.gray300,
+                    },
+                    !isDone && !isCancelled && {
+                      borderColor: colors.gray300,
+                    },
+                    isCheckboxDisabled && {
+                      opacity: 0.5, // Visual indicator for disabled state
+                    },
+                  ]}
+                >
+                  {isDone && (
+                    <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                  )}
+                  {isCancelled && (
+                    <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>✕</Text>
+                  )}
+                </Pressable>
+              );
+            })()}
 
-            {/* Task Title - Pressable */}
-            <Pressable
-              onPress={handleTitlePress}
-              style={{ flex: 1 }}
-            >
-              <Text 
-                style={[
-                  {
-                    fontSize: 16,
-                    flex: 1,
-                  },
-                  isDone && {
-                    color: colors.textSub,
-                    textDecorationLine: 'line-through',
-                  },
-                  isCancelled && {
-                    color: colors.textDisabled,
-                    textDecorationLine: 'line-through',
-                  },
-                  !isDone && !isCancelled && {
-                    color: colors.textMain,
+            {/* Task Title + Time Badge Container */}
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
+              {/* Task Title - Pressable */}
+              <Pressable
+                onPress={handleTitlePress}
+                style={{ flexShrink: 1, minWidth: 0 }} // minWidth: 0 to allow text truncation
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              >
+                <Text 
+                  numberOfLines={0} // Show all lines (no truncation)
+                  style={useMemo(() => {
+                    const baseStyle = {
+                      fontSize: 14,
+                      fontWeight: '500' as '500',
+                      minWidth: 0, // Allow text to shrink
+                    };
+                    
+                    if (isDone) {
+                      return { ...baseStyle, color: colors.textSub, textDecorationLine: 'line-through' as const };
+                    }
+                    if (isCancelled) {
+                      return { ...baseStyle, color: colors.textDisabled, textDecorationLine: 'line-through' as const };
+                    }
+                    if (isMyTask) {
+                      return { ...baseStyle, color: colors.textMain, fontWeight: '500' as '500' };
+                    }
+                    return { ...baseStyle, color: colors.textSub, fontWeight: '400' as '400' };
+                  }, [isDone, isCancelled, isMyTask])}
+                >
+                  {task.title}
+                </Text>
+              </Pressable>
+
+              {/* Time Badge - 제목 바로 옆에 표시 */}
+              {task.due_time && (
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: '#F1F5F9', // Slate 100
+                  paddingHorizontal: 6,
+                  paddingVertical: 4,
+                  borderRadius: 6,
+                  flexShrink: 0,
+                }}>
+                  <Clock size={10} color="#475569" strokeWidth={2} />
+                  <Text style={{
+                    fontSize: 10,
                     fontWeight: '500',
-                  },
-                ]}
-              >
-                {task.title}
-              </Text>
-            </Pressable>
+                    color: '#475569', // Slate 600
+                    marginLeft: 4,
+                  }}>
+                    {formatTime(task.due_time)}
+                  </Text>
+                </View>
+              )}
+            </View>
 
-        {/* Badges */}
-        <View className="flex-row items-center gap-2 flex-shrink-0">
-          {/* Time Badge */}
-          {task.due_time && (
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: '#F1F5F9', // Slate 100
-              paddingHorizontal: 8,
-              paddingVertical: 4,
-              borderRadius: 6, // 4-6px range
-            }}>
-              <View style={{ marginRight: 4 }}>
-                <Clock size={12} color="#475569" strokeWidth={2} />
+            {/* 지연 뱃지 (같은 줄에 표시) - TODO일 때 Rollover, DONE일 때 Late Completion */}
+            {((isOverdue && daysOverdue > 0 && isTodo) || (isDone && isLateCompletion > 0)) && (
+              <View style={{
+                backgroundColor: 'rgba(245, 158, 11, 0.2)', // bg-warning/20
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: borderRadius.sm,
+                flexShrink: 0,
+                marginTop: 2,
+              }}>
+                <Text style={{ 
+                  color: colors.textMain,
+                  fontSize: 12, 
+                  fontWeight: '500' 
+                }}>
+                  +{isDone ? isLateCompletion : daysOverdue}
+                </Text>
               </View>
-              <Text style={{
-                fontSize: 12,
-                fontWeight: '500',
-                color: '#475569', // Slate 600
-              }}>
-                {formatTime(task.due_time)}
-              </Text>
-            </View>
-          )}
+            )}
+          </View>
 
-          {/* From Backlog Badge - for DONE tasks without due_date */}
-          {isDone && !task.due_date && (
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: '#F1F5F9', // Slate 100
-              paddingHorizontal: 8,
-              paddingVertical: 4,
-              borderRadius: 6, // 4-6px range
-            }}>
-              <Package size={12} color="#475569" strokeWidth={2} />
-              <Text style={{
-                fontSize: 12,
-                fontWeight: '500',
-                color: '#475569', // Slate 600
-                marginLeft: 4,
+          {/* 두 번째 줄: 그룹명 + 담당자이니셜 + 백로그뱃지 */}
+          <View style={{ 
+            flexDirection: 'row', 
+            alignItems: 'center', 
+            gap: 6,
+            flexWrap: 'wrap', // Allow badges to wrap to next line
+            marginLeft: 36, // Align with title (checkbox width + gap)
+          }}>
+            {/* Group Badge */}
+            {groupName && (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#F1F5F9', // Slate 100
+                paddingHorizontal: 6,
+                paddingVertical: 4,
+                borderRadius: 6,
+                flexShrink: 0,
               }}>
-                Backlog
-              </Text>
-            </View>
-          )}
+                <Users size={10} color="#475569" strokeWidth={2} />
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '500',
+                  color: '#475569', // Slate 600
+                  marginLeft: 4,
+                  maxWidth: 100, // Limit group name width
+                }}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                >
+                  {groupName}
+                </Text>
+              </View>
+            )}
 
-          {/* Late Completion Badge - for DONE tasks completed after due_date */}
-          {isLateCompletion > 0 && (
-            <View style={{
-              backgroundColor: 'rgba(245, 158, 11, 0.2)', // bg-warning/20
-              paddingHorizontal: 8,
-              paddingVertical: 4,
-              borderRadius: borderRadius.sm,
-            }}>
-              <Text style={{ 
-                color: colors.textMain, // text-main
-                fontSize: 12, 
-                fontWeight: '500' 
-              }}>
-                +{isLateCompletion}
-              </Text>
-            </View>
-          )}
+            {/* Assignee Avatars (for group tasks) - show for both TODO and DONE */}
+            {isGroupTask && task.assignees && task.assignees.length > 0 && (
+              <AssigneeAvatars
+                taskId={task.id}
+                groupId={task.group_id}
+                assignees={task.assignees.map((a: any) => ({
+                  user_id: a.user_id,
+                  nickname: a.profile?.nickname || 'Unknown',
+                  avatar_url: a.profile?.avatar_url || null,
+                  is_completed: a.is_completed,
+                  completed_at: a.completed_at,
+                }))}
+                size={20}
+                showCompletionRate={false}
+              />
+            )}
 
-          {/* Rollover Badge - only for overdue TODO items */}
-          {isOverdue && daysOverdue > 0 && isTodo && (
-            <View style={{
-              backgroundColor: 'rgba(245, 158, 11, 0.2)', // bg-warning/20
-              paddingHorizontal: 8,
-              paddingVertical: 4,
-              borderRadius: borderRadius.sm,
-            }}>
-              <Text style={{ 
-                color: colors.textMain, // text-main
-                fontSize: 12, 
-                fontWeight: '500' 
+            {/* From Backlog Badge - for DONE tasks without due_date */}
+            {isDone && !task.due_date && (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#F1F5F9', // Slate 100
+                paddingHorizontal: 6,
+                paddingVertical: 4,
+                borderRadius: 6,
+                flexShrink: 0,
               }}>
-                +{daysOverdue}
-              </Text>
-            </View>
-          )}
-        </View>
+                <Package size={10} color="#475569" strokeWidth={2} />
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '500',
+                  color: '#475569', // Slate 600
+                  marginLeft: 4,
+                }}>
+                  Backlog
+                </Text>
+              </View>
+            )}
           </View>
         </View>
-      </Swipeable>
-      
-      {/* Edit Task Bottom Sheet */}
-      <EditTaskBottomSheet
-        visible={isEditSheetVisible}
-        onClose={() => setIsEditSheetVisible(false)}
-        task={{
-          id: task.id,
-          title: task.title,
-          due_date: task.due_date,
-          due_time: task.due_time,
-        }}
-        onUpdate={handleTaskUpdate}
-        onDateChange={onDateChange}
-      />
-    </View>
+      </View>
+    
+    {/* Edit Task Bottom Sheet */}
+    <EditTaskBottomSheet
+      visible={isEditSheetVisible}
+      onClose={() => setIsEditSheetVisible(false)}
+      task={editTaskData}
+      onUpdate={handleTaskUpdate}
+      onDateChange={onDateChange}
+    />
+    </>
   );
 }
+
+// Memoize TaskItem to prevent unnecessary re-renders
+export const MemoizedTaskItem = React.memo(TaskItem, (prevProps, nextProps) => {
+  // Custom comparison function for better performance
+  return (
+    prevProps.task.id === nextProps.task.id &&
+    prevProps.task.status === nextProps.task.status &&
+    prevProps.task.title === nextProps.task.title &&
+    prevProps.task.due_date === nextProps.task.due_date &&
+    prevProps.task.due_time === nextProps.task.due_time &&
+    prevProps.task.completed_at === nextProps.task.completed_at &&
+    prevProps.task.group_id === nextProps.task.group_id &&
+    JSON.stringify(prevProps.task.assignees) === JSON.stringify(nextProps.task.assignees) &&
+    prevProps.isFuture === nextProps.isFuture &&
+    prevProps.isOverdue === nextProps.isOverdue &&
+    prevProps.daysOverdue === nextProps.daysOverdue &&
+    prevProps.sectionDate === nextProps.sectionDate
+  );
+});
 
 // Modern Minimalist Styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    ...(Platform.OS === 'web' && { height: '100vh' }),
-  },
+    // Note: minHeight: '100vh' is web-only and handled via Platform check in component
+  } as any,
   textMain: {
     color: colors.textMain,
   },

@@ -1,12 +1,12 @@
 /**
- * Week Tasks Hook - Fetch tasks for a specific week range
+ * OPTIMIZED: Week Tasks Hook
+ * Single API call for better performance
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { addDays, endOfWeek, format, startOfWeek, subWeeks } from 'date-fns';
+import { addDays, endOfWeek, format, startOfWeek } from 'date-fns';
 import { useState } from 'react';
-import { getActiveTasks, getTimelineTasks } from '../api/tasks';
-import type { Task } from '../types';
+import { getAllTasksInRange } from '../api/tasks';
 
 export function useWeekTasks() {
   // Current week offset (0 = this week, -1 = last week, +1 = next week)
@@ -21,37 +21,29 @@ export function useWeekTasks() {
   const weekStartStr = format(weekStart, 'yyyy-MM-dd');
   const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
 
-  // Fetch tasks for the week: Active tasks + Timeline range
-  const { data: tasks, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['tasks', 'week', weekStartStr, weekEndStr],
+  // Include past 30 days for overdue tasks
+  const startDate = format(addDays(weekStart, -30), 'yyyy-MM-dd');
+
+  // OPTIMIZED: Single API call for entire range (all statuses)
+  const query = useQuery({
+    queryKey: ['tasks', 'unified', startDate, weekEndStr],
     queryFn: async () => {
-      // Run both queries in parallel
-      const [activeResult, timelineResult] = await Promise.all([
-        getActiveTasks(), // All TODO tasks with due_date <= today
-        getTimelineTasks(weekStartStr, weekEndStr), // Tasks in week range
-      ]);
-
-      if (activeResult.error) throw activeResult.error;
-      if (timelineResult.error) throw timelineResult.error;
-
-      // Merge and deduplicate by id
-      const taskMap = new Map<string, Task>();
-      
-      // Add active tasks first
-      activeResult.data?.forEach(task => {
-        taskMap.set(task.id, task);
-      });
-
-      // Add timeline tasks (won't overwrite if already exists)
-      timelineResult.data?.forEach(task => {
-        if (!taskMap.has(task.id)) {
-          taskMap.set(task.id, task);
-        }
-      });
-
-      return Array.from(taskMap.values());
+      const result = await getAllTasksInRange(startDate, weekEndStr);
+      if (result.error) throw result.error;
+      return result.data || [];
     },
+    staleTime: 1000 * 60 * 5, // 5 minutes (longer to prevent auto-refetch)
+    gcTime: 1000 * 60 * 10, // 10 minutes
+    refetchOnMount: false, // Don't refetch on mount if data exists
+    refetchOnWindowFocus: false, // Don't refetch on window focus
   });
+
+  const tasks = query.data || [];
+  const isLoading = query.isLoading;
+  const isError = query.isError;
+  const error = query.error;
+  
+  const refetch = query.refetch;
 
   // Navigation functions
   const goToPreviousWeek = () => setWeekOffset((prev) => prev - 1);

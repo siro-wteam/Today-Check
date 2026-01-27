@@ -1,4 +1,5 @@
 import { AddTaskModal } from '@/components/AddTaskModal';
+import { HapticTab } from '@/components/haptic-tab';
 import { Archive, Home, Plus, User, Users } from 'lucide-react-native';
 import { Tabs } from 'expo-router';
 import { useState } from 'react';
@@ -14,6 +15,7 @@ export default function TabLayout() {
           headerShown: false,
           tabBarActiveTintColor: '#0080F0', // Primary color
           tabBarInactiveTintColor: '#4B5563', // Darker gray (gray600)
+          tabBarButton: (props) => <HapticTab {...props} />,
           tabBarStyle: {
             borderTopWidth: 1,
             borderTopColor: 'rgba(229, 231, 235, 0.5)', // border-border/50
@@ -21,6 +23,7 @@ export default function TabLayout() {
             paddingBottom: Platform.OS === 'ios' ? 20 : 10,
             paddingTop: 10,
             height: Platform.OS === 'ios' ? 90 : 70,
+            pointerEvents: 'auto',
           },
           tabBarLabelStyle: {
             fontSize: 12,

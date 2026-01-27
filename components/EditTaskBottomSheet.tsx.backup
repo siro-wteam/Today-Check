@@ -1,0 +1,856 @@
+import { colors } from '@/constants/colors';
+import { deleteTask, updateTask, updateTaskAssignees } from '@/lib/api/tasks';
+import { useAuth } from '@/lib/hooks/use-auth';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { addDays, format, isToday, isTomorrow, parse, parseISO } from 'date-fns';
+import { Trash2, Users } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    Alert,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    Text,
+    TextInput,
+    View,
+} from 'react-native';
+
+interface EditTaskBottomSheetProps {
+  visible: boolean;
+  onClose: () => void;
+  task: {
+    id: string;
+    title: string;
+    due_date: string | null;
+    due_time: string | null;
+    group_id?: string | null;
+    assignees?: Array<{ user_id: string; profile?: { nickname: string } }>;
+  };
+  onUpdate: () => void; // Callback after task is updated
+  onDateChange?: (dateStr: string) => void; // Optional callback when date changes (for navigation)
+}
+
+export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateChange }: EditTaskBottomSheetProps) {
+  const { groups } = useGroupStore();
+  const { user } = useAuth();
+  const [title, setTitle] = useState(task.title);
+  const [dueDate, setDueDate] = useState<Date | null>(task.due_date ? parseISO(task.due_date) : null);
+  const [dueTime, setDueTime] = useState<Date | null>(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Handle close (same as AddTaskModal)
+  // Note: Directly use onClose to ensure proper state update
+  
+  // Group task fields
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(task.group_id || null);
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>(
+    task.assignees?.map(a => a.user_id) || []
+  );
+
+  const dateInputRef = useRef<any>(null);
+  const timeInputRef = useRef<any>(null);
+  const prevVisibleRef = useRef(false);
+  const titleInputRef = useRef<TextInput>(null);
+  
+  // Get current group's members
+  const currentGroup = groups.find(g => g.id === selectedGroupId);
+  
+  // Handle close (same as AddTaskModal - reset form and close)
+  const isClosingRef = useRef(false); // Prevent multiple close calls
+  const handleClose = useCallback(() => {
+    if (isClosingRef.current) return; // Prevent multiple calls
+    isClosingRef.current = true;
+    
+    // Dismiss keyboard first
+    Keyboard.dismiss();
+    
+    // Reset form state
+    setTitle(task.title);
+    setDueDate(task.due_date ? parseISO(task.due_date) : null);
+    setDueTime(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
+    setSelectedGroupId(task.group_id || null);
+    setSelectedAssigneeIds(task.assignees?.map(a => a.user_id) || []);
+    setHasChanges(false);
+    setShowDatePicker(false);
+    setShowTimePicker(false);
+    
+    // Close modal
+    onClose();
+    
+    // Reset flag after a delay
+    setTimeout(() => {
+      isClosingRef.current = false;
+    }, 300);
+  }, [task, onClose]);
+  
+  // Handle keyboard dismiss - close modal when keyboard is dismissed (same as AddTaskModal behavior)
+  useEffect(() => {
+    if (!visible) {
+      isClosingRef.current = false;
+      return;
+    }
+    
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      // Only close if no date/time picker is open and modal is still visible
+      if (visible && !showDatePicker && !showTimePicker && !isClosingRef.current) {
+        // Small delay to check if focus moved to another input
+        setTimeout(() => {
+          if (visible && !showDatePicker && !showTimePicker && !isClosingRef.current) {
+            handleClose();
+          }
+        }, 100);
+      }
+    });
+    
+    return () => {
+      keyboardDidHideListener.remove();
+    };
+  }, [visible, showDatePicker, showTimePicker, handleClose]);
+  
+  // Check if user can edit this task
+  // - Group tasks: Only OWNER can edit
+  // - Personal tasks: Creator can edit (assumed, RLS will enforce)
+  const canEdit = (() => {
+    // If original task is a group task, check if user is OWNER
+    if (task.group_id) {
+      const originalGroup = groups.find(g => g.id === task.group_id);
+      return originalGroup?.myRole === 'OWNER';
+    }
+    // Personal task: creator can edit (RLS will enforce)
+    return true;
+  })();
+  
+  const canDelete = canEdit; // Same permission for delete
+  
+  // Check if selected group allows editing (for group switching)
+  const canEditSelectedGroup = selectedGroupId
+    ? groups.find(g => g.id === selectedGroupId)?.myRole === 'OWNER'
+    : true; // Personal task
+
+  // Reset form when modal opens (only when visible changes from false to true)
+  useEffect(() => {
+    if (visible && !prevVisibleRef.current) {
+      // Modal just opened - reset form with current task data
+      setTitle(task.title);
+      setDueDate(task.due_date ? parseISO(task.due_date) : null);
+      setDueTime(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
+      setSelectedGroupId(task.group_id || null);
+      setSelectedAssigneeIds(task.assignees?.map(a => a.user_id) || []);
+      setHasChanges(false);
+    }
+    prevVisibleRef.current = visible;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]); // Only depend on visible to prevent re-opening when task data updates
+
+  // Track changes
+  useEffect(() => {
+    const titleChanged = title !== task.title;
+    const dateChanged = (dueDate ? format(dueDate, 'yyyy-MM-dd') : null) !== task.due_date;
+    const timeChanged = (dueTime ? format(dueTime, 'HH:mm:ss') : null) !== task.due_time;
+    const groupChanged = selectedGroupId !== (task.group_id || null);
+    const assigneesChanged = JSON.stringify(selectedAssigneeIds.sort()) !== 
+      JSON.stringify((task.assignees?.map(a => a.user_id) || []).sort());
+    setHasChanges(titleChanged || dateChanged || timeChanged || groupChanged || assigneesChanged);
+  }, [title, dueDate, dueTime, selectedGroupId, selectedAssigneeIds, task]);
+
+  // 웹에서 날짜 선택기 자동 열기
+  useEffect(() => {
+    if (Platform.OS === 'web' && showDatePicker && dateInputRef.current) {
+      setTimeout(() => {
+        dateInputRef.current?.showPicker?.();
+      }, 100);
+    }
+  }, [showDatePicker]);
+
+  // 웹에서 시간 선택기 자동 열기
+  useEffect(() => {
+    if (Platform.OS === 'web' && showTimePicker && timeInputRef.current) {
+      setTimeout(() => {
+        timeInputRef.current?.showPicker?.();
+      }, 100);
+    }
+  }, [showTimePicker]);
+
+  // 기본 시간 계산: 현재시간 + 1시간, 분은 00분
+  const getDefaultTime = () => {
+    const now = new Date();
+    const defaultTime = new Date();
+    defaultTime.setHours(now.getHours() + 1);
+    defaultTime.setMinutes(0);
+    defaultTime.setSeconds(0);
+    return defaultTime;
+  };
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      if (Platform.OS === 'web') {
+        alert('Task title cannot be empty');
+      } else {
+        Alert.alert('Error', 'Task title cannot be empty');
+      }
+      return;
+    }
+
+    if (!canEdit) {
+      if (Platform.OS === 'web') {
+        alert('Only group owners can edit group tasks');
+      } else {
+        Alert.alert('Permission Denied', 'Only group owners can edit group tasks');
+      }
+      return;
+    }
+
+    try {
+      // Step 1: Update task basic fields
+      const updates: any = {
+        title: title.trim(),
+        group_id: selectedGroupId, // Can be null (personal task)
+      };
+
+      if (dueDate) {
+        updates.due_date = format(dueDate, 'yyyy-MM-dd');
+        updates.original_due_date = format(dueDate, 'yyyy-MM-dd');
+      } else {
+        updates.due_date = null;
+        updates.original_due_date = null;
+      }
+
+      if (dueTime) {
+        updates.due_time = format(dueTime, 'HH:mm:ss');
+      } else {
+        updates.due_time = null;
+      }
+
+      await updateTask({ id: task.id, ...updates });
+
+      // Step 2: Update assignees
+      // If switching to personal task, remove all assignees
+      // If switching to group task or staying in group, update assignees
+      if (selectedGroupId) {
+        // Group task: update assignees (can be empty array)
+        await updateTaskAssignees(task.id, selectedAssigneeIds);
+      } else {
+        // Personal task: remove all assignees
+        await updateTaskAssignees(task.id, []);
+      }
+
+      // Close modal first
+      onClose();
+      // Call onUpdate after modal is fully closed to avoid re-rendering issues
+      // Use longer delay to ensure modal state is updated
+      setTimeout(() => {
+        onUpdate();
+      }, 300);
+    } catch (error: any) {
+      console.error('Error updating task:', error);
+      if (Platform.OS === 'web') {
+        alert('Failed to update task: ' + error.message);
+      } else {
+        Alert.alert('Update Failed', error.message);
+      }
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!canDelete) {
+      if (Platform.OS === 'web') {
+        alert('Only group owners can delete group tasks');
+      } else {
+        Alert.alert('Permission Denied', 'Only group owners can delete group tasks');
+      }
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      if (!confirm('Are you sure you want to delete this task?')) {
+        return;
+      }
+    } else {
+      Alert.alert(
+        'Delete Task',
+        'Are you sure you want to delete this task?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              await deleteTask(task.id);
+              onClose();
+              // Call onUpdate after modal is fully closed to avoid re-rendering issues
+              setTimeout(() => {
+                onUpdate();
+              }, 300);
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    await deleteTask(task.id);
+    onClose();
+    // Call onUpdate after modal is fully closed to avoid re-rendering issues
+    setTimeout(() => {
+      onUpdate();
+    }, 300);
+  };
+
+  // Toggle assignee selection
+  const toggleAssignee = (userId: string) => {
+    const isCurrentlySelected = selectedAssigneeIds.includes(userId);
+    
+    if (isCurrentlySelected) {
+      setSelectedAssigneeIds(prev => prev.filter(id => id !== userId));
+    } else {
+      setSelectedAssigneeIds(prev => [...prev, userId]);
+    }
+  };
+
+  const handleQuickDate = (date: Date | null) => {
+    // DatePicker가 열려있으면 닫기
+    setShowDatePicker(false);
+    setShowTimePicker(false);
+
+    if (dueDate && date) {
+      // 날짜만 비교 (시간 제외)
+      const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+      const targetDateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      
+      if (dueDateOnly.getTime() === targetDateOnly.getTime()) {
+        // 같은 날짜를 다시 클릭하면 토글 (백로그로 변경)
+        setDueDate(null);
+        setDueTime(null); // 날짜 해제 시 시간도 초기화
+        return;
+      }
+    }
+    
+    const newDate = date;
+    setDueDate(newDate);
+    
+    // If date changed, notify parent for navigation
+    if (onDateChange && newDate) {
+      const dateStr = format(newDate, 'yyyy-MM-dd');
+      if (task.due_date !== dateStr) {
+        onDateChange(dateStr);
+      }
+    }
+  };
+
+  const isDateSelected = (targetDate: Date | null) => {
+    if (!dueDate || !targetDate) return false;
+    
+    // 날짜만 비교 (시간 제외)
+    const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+    const targetDateOnly = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+    
+    return dueDateOnly.getTime() === targetDateOnly.getTime();
+  };
+
+  const getDateButtonText = () => {
+    if (!dueDate) return '📅 Pick Date';
+    
+    // Check if today or tomorrow in local timezone
+    const today = new Date();
+    const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+    
+    const diffDays = Math.floor((dueDateOnly.getTime() - todayOnly.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Tomorrow';
+    
+    return format(dueDate, 'MMM d');
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={handleClose}
+    >
+      <Pressable
+        className="flex-1 bg-black/50 justify-end"
+        onPress={handleClose}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <Pressable onPress={(e) => e.stopPropagation()}>
+            <View className="bg-white dark:bg-gray-900 rounded-t-3xl px-6 py-6">
+              {/* Header */}
+              <View className="flex-row justify-between items-center mb-6">
+                <Text className="text-xl font-bold text-gray-900 dark:text-white">
+                  Edit Task
+                </Text>
+                <View className="flex-row items-center gap-3">
+                  {/* Delete Button */}
+                  <Pressable onPress={handleDelete} disabled={!canDelete}>
+                    <Trash2 
+                      size={24} 
+                      color={canDelete ? "#EF4444" : "#9ca3af"} 
+                      strokeWidth={2} 
+                    />
+                  </Pressable>
+                  {/* Close Button */}
+                  <Pressable onPress={handleClose}>
+                    <Text className="text-gray-500 dark:text-gray-400 text-2xl">×</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Permission Warning */}
+              {!canEdit && (
+                <View className="bg-yellow-50 dark:bg-yellow-900/20 rounded-xl px-4 py-3 mb-4">
+                  <Text className="text-yellow-800 dark:text-yellow-200 text-sm">
+                    ⚠️ Only group owners can edit group tasks
+                  </Text>
+                </View>
+              )}
+
+              {/* Group Selector */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                className="mb-4"
+              >
+                <View className="flex-row gap-2">
+                  {/* Personal task button */}
+                  <Pressable
+                    onPress={() => {
+                      setSelectedGroupId(null);
+                      setSelectedAssigneeIds([]); // Clear assignees when switching to personal
+                    }}
+                    disabled={!canEdit}
+                    className={`px-4 py-2 rounded-full flex-row items-center gap-2 ${
+                      selectedGroupId === null
+                        ? 'bg-blue-600'
+                        : 'bg-gray-100 dark:bg-gray-800'
+                    } ${!canEdit ? 'opacity-50' : ''}`}
+                  >
+                    <Text
+                      className={`font-semibold ${
+                        selectedGroupId === null
+                          ? 'text-white'
+                          : 'text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      Personal
+                    </Text>
+                  </Pressable>
+
+                  {/* Group buttons */}
+                  {groups.map(group => {
+                    const isGroupOwner = group.myRole === 'OWNER';
+                    return (
+                      <Pressable
+                        key={group.id}
+                        onPress={() => {
+                          if (!isGroupOwner) {
+                            if (Platform.OS === 'web') {
+                              alert('Only group owners can assign tasks to this group');
+                            } else {
+                              Alert.alert('Permission Denied', 'Only group owners can assign tasks to this group');
+                            }
+                            return;
+                          }
+                          setSelectedGroupId(group.id);
+                          setSelectedAssigneeIds([]); // Reset assignees when changing group
+                        }}
+                        disabled={!canEdit || !isGroupOwner}
+                        className={`px-4 py-2 rounded-full flex-row items-center gap-2 ${
+                          selectedGroupId === group.id
+                            ? 'bg-blue-600'
+                            : 'bg-gray-100 dark:bg-gray-800'
+                        } ${(!canEdit || !isGroupOwner) ? 'opacity-50' : ''}`}
+                      >
+                      <Users 
+                        size={14} 
+                        color={selectedGroupId === group.id ? '#ffffff' : colors.textSub} 
+                      />
+                      <Text
+                        className={`font-semibold ${
+                          selectedGroupId === group.id
+                            ? 'text-white'
+                            : 'text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {group.name}
+                      </Text>
+                    </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+
+              {/* Title Input */}
+              <TextInput
+                ref={titleInputRef}
+                className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-4 text-base text-gray-900 dark:text-white mb-4"
+                placeholder="What do you want to do?"
+                placeholderTextColor="#9ca3af"
+                value={title}
+                onChangeText={setTitle}
+                autoFocus
+                editable={canEdit}
+              />
+
+              {/* Assignee Bar (only for group tasks) */}
+              {selectedGroupId && currentGroup && canEdit && (
+                <View className="mb-4">
+                  <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    Assign to:
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                  >
+                    <View className="flex-row gap-3">
+                      {currentGroup.members.map(member => {
+                        const isSelected = selectedAssigneeIds.includes(member.id);
+                        const isCurrentUser = member.id === user?.id;
+                        
+                        return (
+                          <Pressable
+                            key={member.id}
+                            onPress={() => toggleAssignee(member.id)}
+                            className={`px-4 py-2 rounded-full flex-row items-center gap-2 border-2 ${
+                              isSelected
+                                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600'
+                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                            }`}
+                          >
+                            {/* Avatar placeholder */}
+                            <View 
+                              className="w-6 h-6 rounded-full items-center justify-center"
+                              style={{ backgroundColor: member.profileColor }}
+                            >
+                              <Text className="text-white text-xs font-bold">
+                                {member.name.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                            
+                            <Text
+                              className={`font-semibold ${
+                                isSelected
+                                  ? 'text-blue-600 dark:text-blue-400'
+                                  : 'text-gray-700 dark:text-gray-300'
+                              }`}
+                            >
+                              {member.name} {isCurrentUser ? '(Me)' : ''}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                  
+                  {/* Assignee count */}
+                  {selectedAssigneeIds.length > 0 && (
+                    <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      {selectedAssigneeIds.length} {selectedAssigneeIds.length === 1 ? 'person' : 'people'} selected
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Quick Date Chips */}
+              <View className="flex-row gap-2 mb-4">
+                {/* Today button */}
+                <Pressable
+                  onPress={() => handleQuickDate(new Date())}
+                  disabled={!canEdit}
+                  className={`px-4 py-2 rounded-full ${
+                    isDateSelected(new Date())
+                      ? 'bg-blue-600'
+                      : 'bg-gray-100 dark:bg-gray-800'
+                  } ${!canEdit ? 'opacity-50' : ''}`}
+                >
+                  <Text
+                    className={`font-semibold ${
+                      isDateSelected(new Date())
+                        ? 'text-white'
+                        : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Today
+                  </Text>
+                </Pressable>
+
+                {/* Tomorrow button */}
+                <Pressable
+                  onPress={() => handleQuickDate(addDays(new Date(), 1))}
+                  disabled={!canEdit}
+                  className={`px-4 py-2 rounded-full ${
+                    isDateSelected(addDays(new Date(), 1))
+                      ? 'bg-blue-600'
+                      : 'bg-gray-100 dark:bg-gray-800'
+                  } ${!canEdit ? 'opacity-50' : ''}`}
+                >
+                  <Text
+                    className={`font-semibold ${
+                      isDateSelected(addDays(new Date(), 1))
+                        ? 'text-white'
+                        : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    Tomorrow
+                  </Text>
+                </Pressable>
+
+                {/* Pick date button */}
+                <Pressable
+                  onPress={() => setShowDatePicker(true)}
+                  disabled={!canEdit}
+                  className={`px-4 py-2 rounded-full ${
+                    dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
+                      ? 'bg-blue-600'
+                      : 'bg-gray-100 dark:bg-gray-800'
+                  } ${!canEdit ? 'opacity-50' : ''}`}
+                >
+                  <Text
+                    className={`font-semibold ${
+                      dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
+                        ? 'text-white'
+                        : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
+                      ? format(dueDate, 'MMM d')
+                      : '📅 Pick Date'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {/* Time Selection (only if date is selected AND date picker is closed) */}
+              {dueDate && !showDatePicker && (
+                <Pressable
+                  onPress={() => setShowTimePicker(true)}
+                  disabled={!canEdit}
+                  className={`bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 mb-4 ${!canEdit ? 'opacity-50' : ''}`}
+                >
+                  <Text className="text-gray-700 dark:text-gray-300">
+                    {dueTime ? `⏰ ${format(dueTime, 'HH:mm')}` : '⏰ Pick Time (Optional)'}
+                  </Text>
+                </Pressable>
+              )}
+
+              {/* DateTimePicker - Native iOS (Inline Spinner) */}
+              {Platform.OS === 'ios' && showDatePicker && (
+                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4">
+                  <DateTimePicker
+                    value={dueDate || new Date()} // Default: today
+                    mode="date"
+                    display="spinner"
+                    onChange={(event, selectedDate) => {
+                      if (selectedDate) {
+                        const newDate = selectedDate;
+                        setDueDate(newDate);
+                        
+                        // If date changed, notify parent for navigation
+                        if (onDateChange) {
+                          const dateStr = format(newDate, 'yyyy-MM-dd');
+                          if (task.due_date !== dateStr) {
+                            onDateChange(dateStr);
+                          }
+                        }
+                      }
+                    }}
+                    minimumDate={new Date()}
+                  />
+                  <View className="flex-row gap-3 mt-4">
+                    <Pressable
+                      onPress={() => {
+                        setDueDate(null);
+                        setShowDatePicker(false);
+                      }}
+                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-4 items-center border border-gray-200 dark:border-gray-700"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-semibold">
+                        Cancel
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setShowDatePicker(false)}
+                      className="flex-1 bg-blue-600 rounded-xl py-4 items-center"
+                    >
+                      <Text className="text-white font-semibold">Confirm</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {Platform.OS === 'ios' && showTimePicker && (
+                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4">
+                  <DateTimePicker
+                    value={dueTime || getDefaultTime()} // Default: current time + 1 hour, 00 min
+                    mode="time"
+                    display="spinner"
+                    minuteInterval={5} // 5-minute intervals
+                    onChange={(event, selectedTime) => {
+                      if (selectedTime) {
+                        setDueTime(selectedTime);
+                      }
+                    }}
+                  />
+                  <View className="flex-row gap-3 mt-4">
+                    <Pressable
+                      onPress={() => {
+                        setDueTime(null);
+                        setShowTimePicker(false);
+                      }}
+                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-4 items-center border border-gray-200 dark:border-gray-700"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-semibold">
+                        Remove Time
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setShowTimePicker(false)}
+                      className="flex-1 bg-blue-600 rounded-xl py-4 items-center"
+                    >
+                      <Text className="text-white font-semibold">Confirm</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {/* DateTimePicker - Android (Dialog) */}
+              {Platform.OS === 'android' && showDatePicker && (
+                <DateTimePicker
+                  value={dueDate || new Date()}
+                  mode="date"
+                  display="default"
+                  onChange={(event, selectedDate) => {
+                    setShowDatePicker(false);
+                    if (event.type === 'set' && selectedDate) {
+                      setDueDate(selectedDate);
+                      
+                      // If date changed, notify parent for navigation
+                      if (onDateChange) {
+                        const dateStr = format(selectedDate, 'yyyy-MM-dd');
+                        if (task.due_date !== dateStr) {
+                          onDateChange(dateStr);
+                        }
+                      }
+                    }
+                  }}
+                />
+              )}
+
+              {Platform.OS === 'android' && showTimePicker && (
+                <DateTimePicker
+                  value={dueTime || getDefaultTime()}
+                  mode="time"
+                  display="default"
+                  minuteInterval={5}
+                  onChange={(event, selectedTime) => {
+                    setShowTimePicker(false);
+                    if (event.type === 'set' && selectedTime) {
+                      setDueTime(selectedTime);
+                    }
+                  }}
+                />
+              )}
+
+              {/* DateTimePicker - Web (HTML Input) */}
+              {Platform.OS === 'web' && showDatePicker && (
+                <View className="mb-4">
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    defaultValue={dueDate ? format(dueDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const selected = parse(e.target.value, 'yyyy-MM-dd', new Date());
+                        setDueDate(selected);
+                        
+                        // If date changed, notify parent for navigation
+                        if (onDateChange) {
+                          const dateStr = e.target.value;
+                          if (task.due_date !== dateStr) {
+                            onDateChange(dateStr);
+                          }
+                        }
+                      }
+                      setShowDatePicker(false);
+                    }}
+                    onBlur={() => setShowDatePicker(false)}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: '12px',
+                      border: '1px solid #d1d5db',
+                      fontSize: '16px',
+                    }}
+                  />
+                </View>
+              )}
+
+              {Platform.OS === 'web' && showTimePicker && (
+                <View className="mb-4">
+                  <input
+                    ref={timeInputRef}
+                    type="time"
+                    defaultValue={dueTime ? format(dueTime, 'HH:mm') : format(getDefaultTime(), 'HH:mm')}
+                    step="300"
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const [hours, minutes] = e.target.value.split(':');
+                        const selected = new Date();
+                        selected.setHours(parseInt(hours), parseInt(minutes), 0);
+                        setDueTime(selected);
+                      }
+                      setShowTimePicker(false);
+                    }}
+                    onBlur={() => setShowTimePicker(false)}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: '12px',
+                      border: '1px solid #d1d5db',
+                      fontSize: '16px',
+                    }}
+                  />
+                </View>
+              )}
+
+              {/* Action Buttons - DatePicker가 열려있지 않을 때만 표시 */}
+              {!showDatePicker && !showTimePicker && (
+                <View className="flex-row gap-3 mt-2">
+                  <Pressable
+                    onPress={handleClose}
+                    className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl py-4 items-center"
+                  >
+                    <Text className="text-gray-700 dark:text-gray-300 font-semibold">
+                      Cancel
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleSave}
+                    className={`flex-1 bg-blue-600 rounded-xl py-4 items-center ${
+                      (!hasChanges || !canEdit) ? 'opacity-50' : ''
+                    }`}
+                    disabled={!hasChanges || !canEdit}
+                  >
+                    <Text className="text-white font-semibold">
+                      Save
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Pressable>
+    </Modal>
+  );
+}

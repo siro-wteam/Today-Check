@@ -16,9 +16,10 @@ export function useCreateTask() {
       return data;
     },
     onSuccess: () => {
-      // Invalidate and refetch tasks
+      // Invalidate unified task query (single cache key)
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
       queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
     },
   });
 

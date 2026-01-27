@@ -1,6 +1,9 @@
 // React
 import { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+
+// burnt web toaster (for showToast on web)
+import { Toaster } from 'burnt/web';
 
 // Third-party libraries
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -16,10 +19,14 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { queryClient } from '@/lib/query-client';
+import { useGroupStore, setQueryClientForGroupStore } from '@/lib/stores/useGroupStore';
 import '../global.css';
 
 // Keep the splash screen visible while we fetch resources
-SplashScreen.preventAutoHideAsync();
+// Use try-catch to handle cases where this might fail
+SplashScreen.preventAutoHideAsync().catch((error) => {
+  console.warn('SplashScreen.preventAutoHideAsync error (ignored):', error);
+});
 
 // Expo Router configuration
 export const unstable_settings = {
@@ -35,9 +42,17 @@ export const unstable_settings = {
  */
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const { fetchMyGroups } = useGroupStore();
+
+  // Fetch groups once when user is authenticated (centralized)
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      fetchMyGroups(user.id);
+    }
+  }, [isAuthenticated, user?.id, fetchMyGroups]);
 
   // Handle authentication-based navigation
   useEffect(() => {
@@ -86,6 +101,13 @@ function RootLayoutNav() {
           }} 
         />
         <Stack.Screen 
+          name="group-detail" 
+          options={{ 
+            presentation: 'modal',
+            headerShown: false, // Hide header for popup-like appearance
+          }} 
+        />
+        <Stack.Screen 
           name="modal" 
           options={{ 
             presentation: 'modal', 
@@ -118,9 +140,31 @@ export default function RootLayout() {
   // Hide splash screen once fonts are loaded (or if there's an error)
   useEffect(() => {
     if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
+      // Use setTimeout to ensure splash screen is fully registered before hiding
+      // This prevents "No native splash screen registered" errors on iOS
+      const hideSplash = async () => {
+        try {
+          // Small delay to ensure native module is ready
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await SplashScreen.hideAsync();
+        } catch (error) {
+          // Ignore errors if splash screen is not registered
+          // This can happen on some platforms or during development
+          if (Platform.OS !== 'web') {
+            console.warn('SplashScreen.hideAsync error (ignored):', error);
+          }
+        }
+      };
+      
+      hideSplash();
     }
   }, [fontsLoaded, fontError]);
+
+  // Set query client for group store (for realtime task synchronization)
+  // Must be called before any conditional returns to maintain hook order
+  useEffect(() => {
+    setQueryClientForGroupStore(queryClient);
+  }, []);
 
   // Show loading indicator while fonts are loading
   if (!fontsLoaded && !fontError) {
@@ -138,9 +182,12 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={styles.gestureContainer}>
-      <QueryClientProvider client={queryClient}>
-        <RootLayoutNav />
-      </QueryClientProvider>
+      <>
+        <QueryClientProvider client={queryClient}>
+          <RootLayoutNav />
+        </QueryClientProvider>
+        {Platform.OS === 'web' && <Toaster position="bottom-center" />}
+      </>
     </GestureHandlerRootView>
   );
 }

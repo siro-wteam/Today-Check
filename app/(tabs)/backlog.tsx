@@ -1,18 +1,20 @@
 import { AppHeader } from '@/components/AppHeader';
-import { DatePickerModal } from '@/components/DatePickerModal';
+import { AssigneeAvatars } from '@/components/AssigneeAvatars';
+import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { EmptyState } from '@/components/EmptyState';
-import { colors, borderRadius, shadows, spacing } from '@/constants/colors';
+import { borderRadius, colors, shadows } from '@/constants/colors';
 import { deleteTask, updateTask } from '@/lib/api/tasks';
+import { useAuth } from '@/lib/hooks/use-auth';
 import { useBacklogTasks } from '@/lib/hooks/use-backlog-tasks';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { Task } from '@/lib/types';
 import { useQueryClient } from '@tanstack/react-query';
-import { addDays, format } from 'date-fns';
+import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Calendar, Check, Package } from 'lucide-react-native';
-import { useCallback, useState } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { Swipeable, TapGestureHandler, LongPressGestureHandler, State } from 'react-native-gesture-handler';
+import { Check, Clock, Package, Users } from 'lucide-react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { showToast } from '@/utils/toast';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -22,13 +24,11 @@ const AVAILABLE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - TITLE_BAR_HEIGHT;
 
 export default function BacklogScreen() {
   const { tasks, isLoading, isError, error, refetch } = useBacklogTasks();
-  const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const queryClient = useQueryClient();
 
   const handleNotificationPress = () => {
-    Alert.alert('Notifications', 'Notification feature coming soon!');
+    showToast('info', 'Notifications', 'Notification feature coming soon!');
   };
 
   // Pull-to-Refresh handler
@@ -38,38 +38,9 @@ export default function BacklogScreen() {
     setRefreshing(false);
   }, [refetch]);
 
-  // Auto-refresh on focus (silent update)
-  useFocusEffect(
-    useCallback(() => {
-      // Silently refetch when screen comes into focus
-      refetch();
-    }, [refetch])
-  );
+  // React Query already handles caching and refetching
+  // No need for auto-refresh on focus - reduces API calls
 
-  const handleScheduleTask = async (taskId: string, dateStr: string) => {
-    await updateTask({ id: taskId, due_date: dateStr, original_due_date: dateStr });
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
-    
-    // Show confirmation
-    if (Platform.OS === 'web') {
-      alert('Task scheduled!');
-    } else {
-      Alert.alert('Scheduled', 'Task has been scheduled');
-    }
-  };
-
-  const handleSwipeRight = (taskId: string) => {
-    setSelectedTaskId(taskId);
-    setIsDatePickerVisible(true);
-  };
-
-  const handleDateSelect = (dateStr: string) => {
-    if (selectedTaskId) {
-      handleScheduleTask(selectedTaskId, dateStr);
-      setSelectedTaskId(null);
-    }
-  };
 
   if (isLoading) {
     return (
@@ -160,6 +131,8 @@ export default function BacklogScreen() {
               paddingBottom: Platform.OS === 'web' ? 200 : 120,
             }}
             showsVerticalScrollIndicator={Platform.OS === 'web'}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled={true}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -178,8 +151,6 @@ export default function BacklogScreen() {
                     <BacklogItem
                       key={item.id}
                       task={item}
-                      onSchedule={(dateStr) => handleScheduleTask(item.id, dateStr)}
-                      onSwipeSchedule={() => handleSwipeRight(item.id)}
                     />
                   ))}
               </View>
@@ -205,8 +176,6 @@ export default function BacklogScreen() {
                       <BacklogItem
                         key={item.id}
                         task={item}
-                        onSchedule={(dateStr) => handleScheduleTask(item.id, dateStr)}
-                        onSwipeSchedule={() => handleSwipeRight(item.id)}
                       />
                     ))}
                 </View>
@@ -216,16 +185,6 @@ export default function BacklogScreen() {
         )}
       </View>
 
-      {/* Date Picker Modal */}
-      <DatePickerModal
-        visible={isDatePickerVisible}
-        onClose={() => {
-          setIsDatePickerVisible(false);
-          setSelectedTaskId(null);
-        }}
-        onSelectDate={handleDateSelect}
-        title="Schedule Task"
-      />
     </SafeAreaView>
   );
 }
@@ -233,22 +192,191 @@ export default function BacklogScreen() {
 // Backlog Item Component
 function BacklogItem({
   task,
-  onSchedule,
-  onSwipeSchedule,
 }: {
   task: Task;
-  onSchedule: (dateStr: string) => void;
-  onSwipeSchedule: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
+  const { groups } = useGroupStore();
+  const { user } = useAuth();
+  const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
   const isDone = task.status === 'DONE';
 
   const handleToggleComplete = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Optimistic update helper
+    const updateTaskInCache = (oldData: any, updateFn: (t: any) => any) => {
+      if (!oldData) return oldData;
+      
+      // Handle both array format (unified) and object format (backlog: { data: Task[], error: any })
+      if (Array.isArray(oldData)) {
+        return oldData.map((t: any) => t.id === task.id ? updateFn(t) : t);
+      }
+      
+      // Handle object format { data: Task[], error: any }
+      if (oldData.data && Array.isArray(oldData.data)) {
+        return {
+          ...oldData,
+          data: oldData.data.map((t: any) => t.id === task.id ? updateFn(t) : t),
+        };
+      }
+      
+      return oldData;
+    };
+
+    // Group task: use assignee logic
+    if (task.group_id && task.assignees) {
+      const myGroup = groups.find(g => g.id === task.group_id);
+      const myRole = myGroup?.myRole;
+
+      if (myRole === 'OWNER' || myRole === 'ADMIN') {
+        // Owner and Admin: toggle all assignees (checkbox controls all)
+        const allCompleted = task.assignees.every(a => a.is_completed);
+        const newCompletionStatus = !allCompleted;
+
+        // Prepare updates for group task completion
+        const updates: any = {
+          assignees: task.assignees?.map((a: any) => ({
+            ...a,
+            is_completed: newCompletionStatus,
+            completed_at: newCompletionStatus ? new Date().toISOString() : null,
+          })),
+          status: newCompletionStatus ? 'DONE' : 'TODO',
+          completed_at: newCompletionStatus ? new Date().toISOString() : null,
+        };
+
+        // Note: When completing (TODO -> DONE), we don't set due_date
+        // getAllTasksInRange uses completed_at to show completed tasks in today's view
+        // So completed_at is sufficient, no need to update due_date
+
+        // Optimistically update UI immediately - update ALL matching queries
+        const optimisticUpdate = (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
+          ...t,
+          ...updates,
+        }));
+
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'backlog'], exact: false },
+          optimisticUpdate
+        );
+
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          optimisticUpdate
+        );
+
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'today'], exact: false },
+          optimisticUpdate
+        );
+
+        // API call in background - only invalidate on error
+        try {
+          const { toggleAllAssigneesCompletion } = await import('@/lib/api/tasks');
+          const { error } = await toggleAllAssigneesCompletion(task.id, newCompletionStatus);
+          
+          // Note: No need to update due_date when completing
+          // getAllTasksInRange uses completed_at to show completed tasks
+          
+          if (error) {
+            console.error('Error toggling all assignees:', error);
+            // Rollback on error
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+          } else {
+            // Success: Invalidate to sync with server state
+            // This ensures the UI reflects the actual server state after refresh
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+          }
+        } catch (error) {
+          console.error('Exception toggling all assignees:', error);
+          // Rollback on error
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+        }
+      } else if (user) {
+        // Member: toggle own status only
+        const myAssignee = task.assignees.find(a => a.user_id === user.id);
+        if (!myAssignee) return;
+
+        const newCompletionStatus = !myAssignee.is_completed;
+
+        // Optimistically update UI immediately - update ALL matching queries
+        const optimisticUpdate = (oldData: any) => updateTaskInCache(oldData, (t: any) => {
+          const updatedAssignees = t.assignees?.map((a: any) =>
+            a.user_id === user.id
+              ? { ...a, is_completed: newCompletionStatus, completed_at: newCompletionStatus ? new Date().toISOString() : null }
+              : a
+          );
+          const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
+          
+          const taskUpdates: any = {
+            assignees: updatedAssignees,
+            status: allCompleted ? 'DONE' : 'TODO',
+            completed_at: allCompleted ? new Date().toISOString() : null,
+          };
+
+          // Note: No need to update due_date when completing
+          // getAllTasksInRange uses completed_at to show completed tasks
+          
+          return {
+            ...t,
+            ...taskUpdates,
+          };
+        });
+
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'backlog'], exact: false },
+          optimisticUpdate
+        );
+
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          optimisticUpdate
+        );
+
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'today'], exact: false },
+          optimisticUpdate
+        );
+
+        // API call in background - only invalidate on error
+        try {
+          const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
+          const { error } = await toggleAssigneeCompletion(
+            task.id,
+            user.id,
+            myAssignee.is_completed
+          );
+          
+          // Note: No need to update due_date when completing
+          // getAllTasksInRange uses completed_at to show completed tasks
+          
+          if (error) {
+            console.error('Error toggling assignee:', error);
+            // Rollback on error
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+          }
+          // Success: keep optimistic update, no invalidation needed
+        } catch (error) {
+          console.error('Exception toggling assignee:', error);
+          // Rollback on error
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+        }
+      }
+      return;
+    }
+
+    // Personal task: original logic with optimistic update
     const newStatus = task.status === 'DONE' ? 'TODO' : 'DONE';
-    
-    // Prepare updates
     const updates: any = { status: newStatus };
 
     // If unchecking (DONE -> TODO) and task has no due_date, assign today's date
@@ -258,287 +386,304 @@ function BacklogItem({
       updates.original_due_date = todayStr;
     }
     
-    await updateTask({ id: task.id, ...updates });
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
+    // Note: When completing (TODO -> DONE), we don't set due_date
+    // getAllTasksInRange uses completed_at to show completed tasks in today's view
+    // So completed_at is sufficient, no need to update due_date
 
-    if (newStatus === 'DONE') {
-      if (Platform.OS === 'web') {
-        alert('Moved to today\'s completed list');
-      } else {
-        Alert.alert('Completed', 'Moved to today\'s completed list');
+    // Optimistically update UI immediately - update ALL matching queries
+    const optimisticUpdate = (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
+      ...t,
+      ...updates,
+      completed_at: newStatus === 'DONE' ? new Date().toISOString() : null,
+    }));
+
+    // Update all related query keys
+    queryClient.setQueriesData(
+      { queryKey: ['tasks', 'backlog'], exact: false },
+      optimisticUpdate
+    );
+
+    queryClient.setQueriesData(
+      { queryKey: ['tasks', 'unified'], exact: false },
+      optimisticUpdate
+    );
+
+    queryClient.setQueriesData(
+      { queryKey: ['tasks', 'today'], exact: false },
+      optimisticUpdate
+    );
+
+    // API call in background - only invalidate on error
+    try {
+      await updateTask({ id: task.id, ...updates });
+      
+      // Success: keep optimistic update, no invalidation needed
+      if (newStatus === 'DONE') {
+        showToast('success', 'Completed', 'Moved to today\'s completed list');
+      } else if (newStatus === 'TODO' && !task.due_date) {
+        showToast('success', 'Scheduled', 'Scheduled for today');
       }
-    } else if (newStatus === 'TODO' && !task.due_date) {
-      // Unchecked and assigned to today
-      if (Platform.OS === 'web') {
-        alert('Scheduled for today');
-      } else {
-        Alert.alert('Scheduled', 'Scheduled for today');
-      }
+    } catch (error) {
+      console.error('Error updating task:', error);
+      // Rollback on error
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
     }
   };
 
-  const handleLongPress = async () => {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: 'Schedule Task',
-          options: ['Do Today', 'Do Tomorrow', 'Pick Date', 'Delete', 'Cancel'],
-          destructiveButtonIndex: 3,
-          cancelButtonIndex: 4,
-        },
-        async (buttonIndex) => {
-          if (buttonIndex === 0) {
-            await handleScheduleTask(today);
-          } else if (buttonIndex === 1) {
-            await handleScheduleTask(tomorrow);
-          } else if (buttonIndex === 2) {
-            setIsDatePickerVisible(true);
-          } else if (buttonIndex === 3) {
-            Alert.alert(
-              'Delete Task',
-              'Are you sure you want to delete this task?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    await deleteTask(task.id);
-                    queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-                  },
-                },
-              ]
-            );
-          }
-        }
-      );
-    } else {
-      if (Platform.OS === 'web') {
-        const action = prompt('Schedule Task:\n1: Do Today\n2: Do Tomorrow\n3: Pick Date\n4: Delete\n0: Cancel');
-        
-        if (action === '1') {
-          await handleScheduleTask(today);
-        } else if (action === '2') {
-          await handleScheduleTask(tomorrow);
-        } else if (action === '3') {
-          setIsDatePickerVisible(true);
-        } else if (action === '4') {
-          if (confirm('Are you sure you want to delete this task?')) {
-            await deleteTask(task.id);
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-          }
-        }
-      } else {
-        Alert.alert(
-          'Schedule Task',
-          '',
-          [
-            {
-              text: 'Do Today',
-              onPress: async () => await handleScheduleTask(today),
-            },
-            {
-              text: 'Do Tomorrow',
-              onPress: async () => await handleScheduleTask(tomorrow),
-            },
-            {
-              text: 'Pick Date',
-              onPress: () => setIsDatePickerVisible(true),
-            },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: () => {
-                Alert.alert(
-                  'Delete Task',
-                  'Are you sure you want to delete this task?',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Delete',
-                      style: 'destructive',
-                      onPress: async () => {
-                        await deleteTask(task.id);
-                        queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-                      },
-                    },
-                  ]
-                );
-              },
-            },
-            {
-              text: 'Cancel',
-              style: 'cancel',
-            },
-          ]
-        );
-      }
-    }
+  // Handle Title Press - Open Edit Sheet
+  const handleTitlePress = () => {
+    setIsEditSheetVisible(true);
   };
 
-  const handleScheduleTask = async (dateStr: string) => {
-    await updateTask({ 
-      id: task.id, 
-      due_date: dateStr,
-      original_due_date: dateStr,
-    });
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-    queryClient.invalidateQueries({ queryKey: ['tasks', 'timeline'] });
+  const handleTaskUpdate = useCallback(() => {
+    // Delay invalidation to ensure modal is closed first
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+    }, 200);
+  }, [queryClient]);
+
+  // Memoize task prop to prevent unnecessary re-renders
+  const editTaskData = useMemo(() => ({
+    id: task.id,
+    title: task.title,
+    due_date: task.due_date,
+    due_time: task.due_time,
+    group_id: task.group_id || null,
+    assignees: task.assignees?.map(a => ({
+      user_id: a.user_id,
+      profile: a.profile,
+    })) || [],
+    status: task.status,
+  }), [task.id, task.title, task.due_date, task.due_time, task.group_id, task.assignees, task.status]);
+
+  // Format time
+  const formatTime = (time: string | null) => {
+    if (!time) return null;
+    return time.substring(0, 5);
   };
 
-  // Render right swipe action (Schedule - Send to Timeline)
-  const renderRightActions = () => (
-    <View 
-      style={{ 
-        backgroundColor: colors.primary, 
-        width: 70,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderTopRightRadius: borderRadius.lg,
-        borderBottomRightRadius: borderRadius.lg,
-      }}
-    >
-      <Calendar size={20} color="#FFFFFF" strokeWidth={2} />
-    </View>
-  );
-
-  const onTap = (event: any) => {
-    if (event.nativeEvent.state === State.END) {
-      handleToggleComplete();
-    }
-  };
-
-  const onLongPress = (event: any) => {
-    if (event.nativeEvent.state === State.ACTIVE) {
-      handleLongPress();
-    }
-  };
+  const isCancelled = task.status === 'CANCEL';
+  const isTodo = task.status === 'TODO';
 
   return (
     <>
       <View
         style={[
           styles.card,
-          isDone && { backgroundColor: `${colors.gray100}80` }, // Muted background for completed
+          isDone && { backgroundColor: '#F8FAFC' }, // Completed task background
+          !isDone && {
+            backgroundColor: colors.card,
+            borderWidth: 1,
+            borderColor: 'rgba(229, 231, 235, 0.5)',
+            ...shadows.sm,
+          },
         ]}
       >
-        <Swipeable
-          renderRightActions={renderRightActions}
-          onSwipeableOpen={() => onSwipeSchedule()}
-          overshootRight={false}
-          enabled={!isDone}
-        >
-          <LongPressGestureHandler
-            onHandlerStateChange={onLongPress}
-            minDurationMs={500}
-          >
-            <TapGestureHandler
-              onHandlerStateChange={onTap}
-              maxDist={10}
-            >
-              <View style={{ flex: 1 }}>
-                <View style={{ 
-                  flexDirection: 'row', 
-                  alignItems: 'center', 
-                  gap: 12,
-                  paddingHorizontal: 16,
-                  paddingVertical: 16,
+        <View style={{ paddingHorizontal: 12, paddingVertical: 12 }}>
+          {/* 첫 번째 줄: 체크박스 + 제목 + 시간뱃지 + delay뱃지 */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+            {/* Checkbox */}
+            {(() => {
+              // Check if MEMBER should have read-only checkbox
+              const myGroup = task.group_id ? groups.find(g => g.id === task.group_id) : null;
+              const isCheckboxDisabled = task.group_id && myGroup?.myRole === 'MEMBER';
+              
+              return (
+                <Pressable
+                  onPress={handleToggleComplete}
+                  disabled={isCheckboxDisabled}
+                  style={[
+                    {
+                      width: 24,
+                      height: 24,
+                      borderRadius: borderRadius.full,
+                      borderWidth: 2,
+                      flexShrink: 0,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginTop: 2, // Align with text baseline
+                    },
+                    isDone && {
+                      backgroundColor: colors.success,
+                      borderColor: colors.success,
+                    },
+                    isCancelled && {
+                      backgroundColor: colors.gray300,
+                      borderColor: colors.gray300,
+                    },
+                    !isDone && !isCancelled && {
+                      borderColor: 'rgba(156, 163, 175, 0.3)',
+                    },
+                    isCheckboxDisabled && {
+                      opacity: 0.5, // Visual indicator for disabled state
+                    },
+                  ]}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  delayPressIn={0}
+                  pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                >
+                  {isDone && (
+                    <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                  )}
+                  {isCancelled && (
+                    <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>✕</Text>
+                  )}
+                </Pressable>
+              );
+            })()}
+
+            {/* Task Title + Time Badge Container */}
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
+              {/* Task Title - Clickable to open edit modal */}
+              <Pressable
+                onPress={handleTitlePress}
+                style={{ flexShrink: 1, minWidth: 0 }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                delayPressIn={0}
+                pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              >
+                <Text 
+                  style={[
+                    {
+                      fontSize: 14,
+                      fontWeight: '500',
+                      minWidth: 0, // Allow text to shrink
+                    },
+                    isDone && {
+                      color: colors.textSub,
+                      textDecorationLine: 'line-through',
+                    },
+                    isCancelled && {
+                      color: colors.textDisabled,
+                      textDecorationLine: 'line-through',
+                    },
+                    !isDone && !isCancelled && {
+                      color: colors.textMain,
+                      fontWeight: '500',
+                    },
+                  ]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                >
+                  {String(task.title || '(Untitled)')}
+                </Text>
+              </Pressable>
+
+              {/* Time Badge - 제목 바로 옆에 표시 */}
+              {task.due_time && (
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: '#F1F5F9', // Slate 100
+                  paddingHorizontal: 6,
+                  paddingVertical: 4,
+                  borderRadius: 6,
+                  flexShrink: 0,
                 }}>
-                  {/* Checkbox - Larger and more prominent */}
-                  <Pressable
-                    onPress={handleToggleComplete}
-                    style={[
-                      {
-                        width: 24,
-                        height: 24,
-                        borderRadius: borderRadius.full,
-                        borderWidth: 2,
-                        flexShrink: 0,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      },
-                      isDone && {
-                        backgroundColor: colors.success,
-                        borderColor: colors.success,
-                      },
-                      !isDone && {
-                        borderColor: `${colors.textSub}4D`, // 30% opacity
-                      },
-                    ]}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    {isDone && (
-                      <Check size={14} color="#FFFFFF" strokeWidth={3} />
-                    )}
-                  </Pressable>
-
-                  {/* Task Title - 2 lines max */}
-                  <Text 
-                    style={[
-                      {
-                        fontSize: 15,
-                        flex: 1,
-                        lineHeight: 22,
-                      },
-                      isDone && {
-                        color: colors.textSub,
-                        textDecorationLine: 'line-through',
-                      },
-                      !isDone && {
-                        color: colors.textMain,
-                      },
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {task.title}
+                  <Clock size={10} color="#475569" strokeWidth={2} />
+                  <Text style={{
+                    fontSize: 10,
+                    fontWeight: '500',
+                    color: '#475569', // Slate 600
+                    marginLeft: 4,
+                  }}>
+                    {String(formatTime(task.due_time) || '')}
                   </Text>
-
-                  {/* Calendar Button */}
-                  <Pressable
-                    onPress={() => setIsDatePickerVisible(true)}
-                    style={[
-                      {
-                        width: 36,
-                        height: 36,
-                        borderRadius: borderRadius.md,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                      },
-                      !isDone && {
-                        backgroundColor: 'transparent',
-                      },
-                    ]}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Calendar 
-                      size={20} 
-                      color={isDone ? colors.textSub : colors.textSub} 
-                      strokeWidth={2} 
-                    />
-                  </Pressable>
                 </View>
+              )}
+            </View>
+          </View>
+
+          {/* 두 번째 줄: 그룹명 + 담당자이니셜 + 백로그뱃지 */}
+          <View style={{ 
+            flexDirection: 'row', 
+            alignItems: 'center', 
+            gap: 6,
+            flexWrap: 'wrap', // Allow badges to wrap to next line
+            marginLeft: 36, // Align with title (checkbox width + gap)
+          }}>
+            {/* Group Badge */}
+            {task.group_id && (() => {
+              const groupName = groups.find(g => g.id === task.group_id)?.name;
+              return groupName ? (
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: '#F1F5F9', // Slate 100
+                  paddingHorizontal: 6,
+                  paddingVertical: 4,
+                  borderRadius: 6,
+                  flexShrink: 0,
+                }}>
+                  <Users size={10} color="#475569" strokeWidth={2} />
+                  <Text style={{
+                    fontSize: 10,
+                    fontWeight: '500',
+                    color: '#475569', // Slate 600
+                    marginLeft: 4,
+                    maxWidth: 100, // Limit group name width
+                  }}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  >
+                    {String(groupName)}
+                  </Text>
+                </View>
+              ) : null;
+            })()}
+
+            {/* Assignee Avatars (for group tasks) - show for both TODO and DONE */}
+            {task.group_id && task.assignees && task.assignees.length > 0 && (
+              <AssigneeAvatars
+                taskId={task.id}
+                groupId={task.group_id}
+                assignees={task.assignees.map(a => ({
+                  user_id: a.user_id,
+                  nickname: a.profile?.nickname || 'Unknown',
+                  avatar_url: a.profile?.avatar_url || null,
+                  is_completed: a.is_completed,
+                  completed_at: a.completed_at,
+                }))}
+                size={20}
+                showCompletionRate={false}
+              />
+            )}
+
+            {/* From Backlog Badge - for DONE tasks without due_date */}
+            {isDone && !task.due_date && (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#F1F5F9', // Slate 100
+                paddingHorizontal: 6,
+                paddingVertical: 4,
+                borderRadius: 6,
+                flexShrink: 0,
+              }}>
+                <Package size={10} color="#475569" strokeWidth={2} />
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '500',
+                  color: '#475569', // Slate 600
+                  marginLeft: 4,
+                }}>
+                  Backlog
+                </Text>
               </View>
-            </TapGestureHandler>
-          </LongPressGestureHandler>
-        </Swipeable>
+            )}
+          </View>
+        </View>
       </View>
 
-      {/* Date Picker Modal for this item */}
-      <DatePickerModal
-        visible={isDatePickerVisible}
-        onClose={() => setIsDatePickerVisible(false)}
-        onSelectDate={(dateStr) => {
-          handleScheduleTask(dateStr);
-          setIsDatePickerVisible(false);
-        }}
-        title="Schedule Task"
+      {/* Edit Task Bottom Sheet */}
+      <EditTaskBottomSheet
+        visible={isEditSheetVisible}
+        onClose={() => setIsEditSheetVisible(false)}
+        task={editTaskData}
+        onUpdate={handleTaskUpdate}
       />
     </>
   );

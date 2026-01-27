@@ -1,0 +1,1817 @@
+import { AddTaskModal } from '@/components/AddTaskModal';
+import { AppHeader } from '@/components/AppHeader';
+import { AssigneeAvatars } from '@/components/AssigneeAvatars';
+import { EmptyState } from '@/components/EmptyState';
+import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
+import { isDateInWeeklyRange, getWeeklyCalendarRanges } from '@/constants/calendar';
+import { groupTasksByDate, getTasksForDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
+import { useAuth } from '@/lib/hooks/use-auth';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { useCalendarStore } from '@/lib/stores/useCalendarStore';
+import type { Task } from '@/lib/types';
+import { useFocusEffect } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
+import { addDays, addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
+import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
+import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Users } from 'lucide-react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
+import Animated from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { showToast } from '@/utils/toast';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const HEADER_HEIGHT = 60; // AppHeader height
+const NAVIGATOR_HEIGHT = 70; // Week navigator height
+const AVAILABLE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - NAVIGATOR_HEIGHT;
+
+// TaskWithOverdue is now imported from task-filtering.ts
+
+interface DailyGroup {
+  date: string; // yyyy-MM-dd
+  dateObj: Date;
+  displayDate: string; // "Jan 20 (Tue)"
+  tasks: TaskWithOverdue[];
+  completedCount: number;
+  totalCount: number;
+}
+
+interface WeekPage {
+  weekStart: Date;
+  weekEnd: Date;
+  weekStartStr: string;
+  weekEndStr: string;
+  displayRange: string; // "Jan 19 - Jan 25"
+  dailyGroups: DailyGroup[];
+}
+
+export default function WeekScreen() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { 
+    tasks, 
+    isLoading, 
+    error, 
+    selectedDate,
+    setSelectedDate,
+    initializeCalendar,
+    updateTask: updateTaskInStore,
+    toggleTaskComplete: toggleTaskCompleteInStore,
+    deleteTask: deleteTaskInStore,
+  } = useCalendarStore();
+  const { fetchMyGroups } = useGroupStore();
+  const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  
+  // Initialize calendar on mount
+  useEffect(() => {
+    initializeCalendar();
+  }, [initializeCalendar]);
+  
+  const flatListRef = useRef<FlatList>(null);
+  const scrollViewRefs = useRef<Map<string, ScrollView>>(new Map()); // Refs for each week's ScrollView
+  const cardPositions = useRef<Map<string, number>>(new Map()); // Store actual Y positions of cards
+  // Get current week's weekStartStr (constant, doesn't change) - define early
+  const THIS_WEEK_START_STR = useMemo(() => {
+    const today = startOfDay(new Date());
+    const currentWeekStart = startOfWeek(today, { weekStartsOn: 1 });
+    return format(currentWeekStart, 'yyyy-MM-dd');
+  }, []);
+  
+  // Use weekStartStr as the source of truth, not index
+  const [currentWeekStartStr, setCurrentWeekStartStr] = useState<string>(THIS_WEEK_START_STR);
+  const [currentWeekDisplay, setCurrentWeekDisplay] = useState('');
+  // Keep currentWeekIndex for compatibility, but derive it from currentWeekStartStr
+  const [currentWeekIndex, setCurrentWeekIndex] = useState(2);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isAddTaskModalVisible, setIsAddTaskModalVisible] = useState(false);
+  const [addTaskInitialDate, setAddTaskInitialDate] = useState<string | undefined>(undefined);
+  
+  // Weekly view range: -2 months ~ +4 months
+  // Initial display: -2 weeks ~ +2 weeks (5 weeks total)
+  const { pastLimit, futureLimit, initialLoadStart, initialLoadEnd } = getWeeklyCalendarRanges();
+  
+  // Calculate week range offsets
+  const weekRange = useMemo(() => {
+    const today = startOfDay(new Date());
+    const todayWeekStart = startOfWeek(today, { weekStartsOn: 1 });
+    
+    const pastLimitWeekStart = startOfWeek(pastLimit, { weekStartsOn: 1 });
+    const futureLimitWeekStart = startOfWeek(futureLimit, { weekStartsOn: 1 });
+    
+    const weeksToPast = Math.floor((todayWeekStart.getTime() - pastLimitWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    const weeksToFuture = Math.floor((futureLimitWeekStart.getTime() - todayWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    
+    return {
+      startOffset: -weeksToPast, // -2 months
+      endOffset: weeksToFuture,  // +4 months
+    };
+  }, [pastLimit, futureLimit]);
+  
+  // Initial week range: -2 weeks ~ +2 weeks (5 weeks total)
+  const initialWeekRange = useMemo(() => {
+    return {
+      startOffset: -2,
+      endOffset: 2,
+    };
+  }, []);
+  
+  // Check if a week is within the allowed range
+  const isWeekInRange = useCallback((weekStart: Date): boolean => {
+    return isDateInWeeklyRange(weekStart);
+  }, []);
+  
+  // Group tasks by date using Map (O(1) lookup) - shared with daily view
+  const tasksByDate = useMemo(() => groupTasksByDate(tasks), [tasks]);
+
+  // Groups are fetched in _layout.tsx (centralized)
+  // No need to fetch here
+
+  // Generate initial week pages: -2 weeks ~ +2 weeks (5 weeks total) for fast display
+  // SIMPLIFIED: This week is always at index 2 (middle of 5 weeks: -2, -1, 0, 1, 2)
+  const generateInitialWeekPages = useCallback((): WeekPage[] => {
+    const today = startOfDay(new Date());
+    const weeks: WeekPage[] = [];
+
+    for (let offset = initialWeekRange.startOffset; offset <= initialWeekRange.endOffset; offset++) {
+      const targetWeek = addWeeks(today, offset);
+      const weekStart = startOfWeek(targetWeek, { weekStartsOn: 1 }); // Monday
+      const weekEnd = endOfWeek(targetWeek, { weekStartsOn: 1 }); // Sunday
+
+      const weekStartStr = format(weekStart, 'yyyy-MM-dd');
+      const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
+      const displayRange = `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d')}`;
+
+      // Generate daily groups using Map for O(1) lookup
+      const dailyGroups: DailyGroup[] = eachDayOfInterval({
+        start: weekStart,
+        end: weekEnd,
+      }).map((date) => {
+        const dateStr = format(date, 'yyyy-MM-dd');
+        const dayTasks = getTasksForDate(tasksByDate, dateStr);
+        
+        const completedCount = dayTasks.filter((t) => t.status === 'DONE').length;
+        const totalCount = dayTasks.length;
+
+        return {
+          date: dateStr,
+          dateObj: date,
+          displayDate: format(date, 'MMM d (EEE)'),
+          tasks: dayTasks,
+          completedCount,
+          totalCount,
+        };
+      });
+
+      weeks.push({
+        weekStart,
+        weekEnd,
+        weekStartStr,
+        weekEndStr,
+        displayRange,
+        dailyGroups,
+      });
+    }
+
+    return weeks;
+  }, [tasksByDate, initialWeekRange]);
+
+  // Generate full week pages: -2 months ~ +4 months (background load)
+  const generateFullWeekPages = useCallback((): WeekPage[] => {
+    const today = startOfDay(new Date());
+    const weeks: WeekPage[] = [];
+
+    for (let offset = weekRange.startOffset; offset <= weekRange.endOffset; offset++) {
+      const targetWeek = addWeeks(today, offset);
+      const weekStart = startOfWeek(targetWeek, { weekStartsOn: 1 }); // Monday
+      const weekEnd = endOfWeek(targetWeek, { weekStartsOn: 1 }); // Sunday
+
+      // Skip if week is outside allowed range
+      if (!isWeekInRange(weekStart)) {
+        continue;
+      }
+
+      const weekStartStr = format(weekStart, 'yyyy-MM-dd');
+      const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
+      const displayRange = `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d')}`;
+
+      // Generate daily groups using Map for O(1) lookup
+      const dailyGroups: DailyGroup[] = eachDayOfInterval({
+        start: weekStart,
+        end: weekEnd,
+      }).map((date) => {
+        const dateStr = format(date, 'yyyy-MM-dd');
+        const dayTasks = getTasksForDate(tasksByDate, dateStr);
+        
+        const completedCount = dayTasks.filter((t) => t.status === 'DONE').length;
+        const totalCount = dayTasks.length;
+
+        return {
+          date: dateStr,
+          dateObj: date,
+          displayDate: format(date, 'MMM d (EEE)'),
+          tasks: dayTasks,
+          completedCount,
+          totalCount,
+        };
+      });
+
+      weeks.push({
+        weekStart,
+        weekEnd,
+        weekStartStr,
+        weekEndStr,
+        displayRange,
+        dailyGroups,
+      });
+    }
+
+    return weeks;
+  }, [tasksByDate, weekRange, isWeekInRange]);
+
+  // Initial week pages: -2 weeks ~ +2 weeks (fast display)
+  const [weekPages, setWeekPages] = useState<WeekPage[]>([]);
+  const weekPagesRef = useRef<WeekPage[]>([]);
+  
+  // Track if we've done initial scroll
+  const hasInitialScrolledRef = useRef(false);
+  // Store initial scroll index (fixed, won't change even when weekPages updates)
+  const initialScrollIndexRef = useRef<number | undefined>(undefined);
+  // Track if full pages have been generated (prevent multiple executions)
+  const hasGeneratedFullPagesRef = useRef(false);
+  // Track when initial load completed to prevent unwanted scrolls
+  const initialLoadCompleteTimeRef = useRef<number | null>(null);
+  // Track if we're in initial load phase (prevent onViewableItemsChanged from scrolling)
+  const isInInitialLoadPhaseRef = useRef(true);
+  // Ref to track currentWeekStartStr without causing onViewableItemsChanged to recreate
+  const currentWeekStartStrRef = useRef<string>(THIS_WEEK_START_STR);
+  // Ref to prevent onViewableItemsChanged from updating state during programmatic scroll
+  const isProgrammaticScrollRef = useRef(false);
+  
+  // Map for O(1) lookup: weekStartStr -> index
+  const weekPagesMap = useMemo(() => {
+    const map = new Map<string, number>();
+    weekPages.forEach((page, index) => {
+      map.set(page.weekStartStr, index);
+    });
+    return map;
+  }, [weekPages]);
+  
+  // Sync currentWeekIndex with currentWeekStartStr
+  useEffect(() => {
+    if (currentWeekStartStr) {
+      currentWeekStartStrRef.current = currentWeekStartStr;
+      const index = weekPagesMap.get(currentWeekStartStr);
+      if (index !== undefined && index !== currentWeekIndex) {
+        setCurrentWeekIndex(index);
+      }
+    }
+  }, [currentWeekStartStr, weekPagesMap, currentWeekIndex]);
+  
+  // Helper: Find week index by date (using weekStartStr as key)
+  const findWeekIndexByDate = useCallback((date: Date): number | null => {
+    const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+    const weekStartStr = format(weekStart, 'yyyy-MM-dd');
+    const index = weekPagesMap.get(weekStartStr);
+    return index !== undefined ? index : null;
+  }, [weekPagesMap]);
+  
+  // Generate initial pages on mount (always generate, even if tasks are empty)
+  useEffect(() => {
+    const initialPages = generateInitialWeekPages();
+    setWeekPages(initialPages);
+    weekPagesRef.current = initialPages;
+    
+    // Set initial scroll index to this week (index 2 in initial 5 weeks: -2, -1, 0, 1, 2)
+    initialScrollIndexRef.current = 2;
+    // Use weekStartStr as source of truth, not index
+    setCurrentWeekStartStr(THIS_WEEK_START_STR);
+    currentWeekStartStrRef.current = THIS_WEEK_START_STR;
+    hasInitialScrolledRef.current = true;
+    isInInitialLoadPhaseRef.current = true; // Mark as initial load phase
+    
+    // Reset selectedDate to today on initial mount to prevent unwanted scrolls
+    const today = startOfDay(new Date());
+    if (selectedDate && format(selectedDate, 'yyyy-MM-dd') !== format(today, 'yyyy-MM-dd')) {
+      console.log('[initial pages] Resetting selectedDate to today');
+      setSelectedDate(today);
+    }
+  }, [generateInitialWeekPages, selectedDate, setSelectedDate, THIS_WEEK_START_STR]);
+  
+  // Generate full pages in background (non-blocking) - delay longer to allow initial render
+  useEffect(() => {
+    // Only generate once, after initial pages are set
+    if (hasGeneratedFullPagesRef.current || weekPages.length === 0) return;
+    
+    // Delay to ensure initial pages are rendered first
+    const timer = setTimeout(() => {
+      hasGeneratedFullPagesRef.current = true;
+      
+      // Generate full pages silently (don't scroll, just update data)
+      const fullPages = generateFullWeekPages();
+      
+      // CRITICAL: Don't update currentWeekIndex here!
+      // The FlatList is already showing index 2 (this week) correctly.
+      // If we update currentWeekIndex to the new index in fullPages array,
+      // it will trigger onViewableItemsChanged and cause unwanted scrolling.
+      
+      // Find this week's index in full pages for reference (but don't use it to update state)
+      const thisWeekIndexInFullPages = fullPages.findIndex(page => page.weekStartStr === THIS_WEEK_START_STR);
+      console.log('[generateFullWeekPages] This week index in full pages:', thisWeekIndexInFullPages, 'Current weekStartStr:', currentWeekStartStr);
+      
+      // Find the correct index for this week in the new array
+      const correctIndex = fullPages.findIndex(page => page.weekStartStr === THIS_WEEK_START_STR);
+      console.log('[generateFullWeekPages] This week index in full pages:', correctIndex, 'Current index:', currentWeekIndex);
+      
+      // CRITICAL: Update weekPages silently - this will cause a re-render but we'll scroll immediately
+      // The key is to scroll BEFORE the user sees the wrong data
+      setWeekPages(fullPages);
+      weekPagesRef.current = fullPages;
+      
+      // Ensure currentWeekStartStr is correct
+      if (currentWeekStartStr !== THIS_WEEK_START_STR) {
+        setCurrentWeekStartStr(THIS_WEEK_START_STR);
+        currentWeekStartStrRef.current = THIS_WEEK_START_STR;
+      }
+      
+      // CRITICAL: Scroll to correct index BEFORE React re-renders with new data
+      // Use flushSync or immediate scroll to prevent showing wrong week
+      if (correctIndex !== -1 && correctIndex !== currentWeekIndex) {
+        isProgrammaticScrollRef.current = true;
+        
+        // Scroll immediately in the same tick to prevent visual flicker
+        // Use a microtask to ensure state is set but scroll happens before render
+        Promise.resolve().then(() => {
+          try {
+            console.log('[generateFullWeekPages] Scrolling to index', correctIndex, 'immediately');
+            flatListRef.current?.scrollToIndex({
+              index: correctIndex,
+              animated: false,
+            });
+            
+            setTimeout(() => {
+              isProgrammaticScrollRef.current = false;
+            }, 200);
+          } catch (error) {
+            console.warn('[generateFullWeekPages] scrollToIndex failed:', error);
+            isProgrammaticScrollRef.current = false;
+          }
+        });
+      }
+      
+      // Mark initial load as complete (but keep isInInitialLoadPhaseRef true for a bit longer)
+      initialLoadCompleteTimeRef.current = Date.now();
+      
+      // After 3 seconds, allow normal operation (reduced from 5 seconds)
+      setTimeout(() => {
+        // Ensure currentWeekStartStr is set to THIS_WEEK_START_STR
+        if (currentWeekStartStr !== THIS_WEEK_START_STR) {
+          console.log('[generateFullWeekPages] Fixing currentWeekStartStr from', currentWeekStartStr, 'to', THIS_WEEK_START_STR);
+          setCurrentWeekStartStr(THIS_WEEK_START_STR);
+          currentWeekStartStrRef.current = THIS_WEEK_START_STR;
+        }
+        
+        isInInitialLoadPhaseRef.current = false;
+        console.log('[generateFullWeekPages] Initial load phase complete, currentWeekStartStr:', currentWeekStartStr || THIS_WEEK_START_STR);
+      }, 3000);
+    }, 2000); // Delay to ensure initial render is complete
+    return () => clearTimeout(timer);
+  }, [generateFullWeekPages, weekPages.length, THIS_WEEK_START_STR]);
+  
+  // Get current week page by weekStartStr (not by index)
+  const currentWeekPage = useMemo(() => {
+    if (!currentWeekStartStr) return undefined;
+    const index = weekPagesMap.get(currentWeekStartStr);
+    return index !== undefined ? weekPages[index] : undefined;
+  }, [weekPages, weekPagesMap, currentWeekStartStr]);
+  
+  // Check if current week is this week (using weekStartStr)
+  const isCurrentWeek = currentWeekStartStr === THIS_WEEK_START_STR;
+  const isPastWeek = currentWeekStartStr ? currentWeekStartStr < THIS_WEEK_START_STR : false;
+  const isFutureWeek = currentWeekStartStr ? currentWeekStartStr > THIS_WEEK_START_STR : false;
+  
+  // Update currentWeekDisplay based on the actual visible week
+  useEffect(() => {
+    if (currentWeekPage) {
+      setCurrentWeekDisplay(currentWeekPage.displayRange || '');
+    }
+  }, [currentWeekPage?.displayRange]);
+
+  // REMOVED: Complex scroll logic - initialScrollIndex handles it
+
+  // Sync with selectedDate from store (only if user navigated from daily view)
+  const lastSelectedDateRef = useRef<Date | null>(null);
+  const isInitialMountRef = useRef(true);
+  
+  // REMOVED: Complex timing logic - not needed
+  
+  // Sync with selectedDate from store (only if user navigated from daily view)
+  useEffect(() => {
+    // Skip on initial mount
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      const today = startOfDay(new Date());
+      lastSelectedDateRef.current = today;
+      // Reset selectedDate to today if it's not today (prevent unwanted scrolls)
+      if (selectedDate && format(selectedDate, 'yyyy-MM-dd') !== format(today, 'yyyy-MM-dd')) {
+        console.log('[selectedDate sync] Resetting selectedDate to today on initial mount');
+        setSelectedDate(today);
+      }
+      return;
+    }
+    
+    // Skip if still in initial load phase
+    if (isInInitialLoadPhaseRef.current) {
+      console.log('[selectedDate sync] Skipping - still in initial load phase');
+      return;
+    }
+    
+    // Only sync if selectedDate changed from daily view (not today, which is default)
+    if (!isLoading && weekPages.length > 0 && selectedDate) {
+      const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+      const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+      const lastSelectedDateStr = lastSelectedDateRef.current ? format(lastSelectedDateRef.current, 'yyyy-MM-dd') : null;
+      
+      console.log('[selectedDate sync] Checking:', { selectedDateStr, todayStr, lastSelectedDateStr, currentWeekIndex });
+      
+      // Only sync if selectedDate changed AND it's not today
+      if (selectedDateStr !== lastSelectedDateStr && selectedDateStr !== todayStr) {
+        lastSelectedDateRef.current = selectedDate;
+        
+        const targetWeekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
+        const targetWeekStartStr = format(targetWeekStart, 'yyyy-MM-dd');
+        const targetIndex = weekPagesMap.get(targetWeekStartStr);
+        
+        console.log('[selectedDate sync] Found target weekStartStr:', targetWeekStartStr, 'index:', targetIndex);
+        
+        if (targetIndex !== undefined && targetIndex < weekPages.length && targetWeekStartStr !== currentWeekStartStr) {
+          setTimeout(() => {
+            try {
+              console.log('[selectedDate sync] Scrolling to index:', targetIndex, 'weekStartStr:', targetWeekStartStr);
+              flatListRef.current?.scrollToIndex({
+                index: targetIndex,
+                animated: true,
+              });
+              setCurrentWeekStartStr(targetWeekStartStr);
+            } catch (error) {
+              console.warn('[selectedDate sync] scrollToIndex failed:', error);
+            }
+          }, 100);
+        }
+      }
+    }
+  }, [selectedDate, weekPages.length, isLoading, currentWeekIndex, findWeekIndexByDate, setSelectedDate]);
+
+  // Scroll to today's card within a specific week using actual measured positions
+  const scrollToTodayInWeek = useCallback((weekStartStr: string) => {
+    const scrollViewRef = scrollViewRefs.current.get(weekStartStr);
+    if (!scrollViewRef) return;
+
+    const today = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    const cardKey = `${weekStartStr}-${today}`;
+    const cardY = cardPositions.current.get(cardKey);
+
+    if (cardY !== undefined) {
+      // Use actual measured position - offset by 10px to show header
+      scrollViewRef.scrollTo({
+        y: Math.max(0, cardY - 10),
+        animated: true,
+      });
+    } else {
+      // Fallback: if position not measured yet, use estimated position
+      const week = weekPages.find(w => w.weekStartStr === weekStartStr);
+      if (!week) return;
+
+      const todayIndex = week.dailyGroups.findIndex(g => g.date === today);
+      if (todayIndex === -1) return;
+
+      const estimatedCardHeight = 200;
+      const paddingTop = 16;
+      const scrollY = paddingTop + (todayIndex * estimatedCardHeight);
+
+      scrollViewRef.scrollTo({
+        y: Math.max(0, scrollY - 10),
+        animated: true,
+      });
+    }
+  }, [weekPages, scrollViewRefs, cardPositions]);
+
+  // weekPagesRef is already declared and updated above
+
+  // Track previous index to detect swipe direction
+  const previousIndexRef = useRef<number>(-1);
+  // Ref to store setCurrentWeekStartStr and setCurrentWeekDisplay to avoid dependency
+  const setCurrentWeekStartStrRef = useRef(setCurrentWeekStartStr);
+  const setCurrentWeekDisplayRef = useRef(setCurrentWeekDisplay);
+  const flatListRefForCallback = useRef(flatListRef.current);
+  
+  // Update refs when values change
+  useEffect(() => {
+    setCurrentWeekStartStrRef.current = setCurrentWeekStartStr;
+    setCurrentWeekDisplayRef.current = setCurrentWeekDisplay;
+    flatListRefForCallback.current = flatListRef.current;
+  }, [setCurrentWeekStartStr, setCurrentWeekDisplay]);
+
+  // Simplified onViewableItemsChanged: Only update state and check swipe limits
+  // Use useCallback with empty deps and refs to prevent "Changing onViewableItemsChanged on the fly" error
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    if (viewableItems.length > 0) {
+      const visibleItem = viewableItems[0];
+      const index = visibleItem.index || 0;
+      const prevIndex = previousIndexRef.current;
+      
+      const currentPages = weekPagesRef.current;
+      
+      // Validate index is within range
+      if (index < 0 || index >= currentPages.length) {
+        console.warn('[onViewableItemsChanged] Index out of range:', index, 'length:', currentPages.length);
+        return;
+      }
+      
+      // CRITICAL: Skip during initial load phase - this prevents unwanted scrolling
+      // when generateFullWeekPages updates weekPages array
+      if (isInInitialLoadPhaseRef.current) {
+        console.log('[onViewableItemsChanged] Skipping - initial load phase, index:', index, 'currentWeekStartStr:', currentWeekStartStrRef.current);
+        // Don't update state at all during initial load
+        return;
+      }
+      
+      // CRITICAL: Skip if this is a programmatic scroll (from generateFullWeekPages)
+      // This prevents state updates that cause visual flickering
+      if (isProgrammaticScrollRef.current) {
+        console.log('[onViewableItemsChanged] Skipping - programmatic scroll in progress');
+        return;
+      }
+      
+      // CRITICAL: Use weekStartStr as source of truth, not index
+      // This way, even if the array changes, we always track the correct week
+      const newPage = currentPages[index];
+      if (!newPage) return;
+      
+      const newWeekStartStr = newPage.weekStartStr;
+      const currentWeekStartStrValue = currentWeekStartStrRef.current;
+      
+      // Only update if the weekStartStr actually changed (user swiped to a different week)
+      if (newWeekStartStr !== currentWeekStartStrValue) {
+        console.log('[onViewableItemsChanged] Week changed from', currentWeekStartStrValue, 'to', newWeekStartStr);
+        setCurrentWeekStartStrRef.current(newWeekStartStr);
+      } else {
+        console.log('[onViewableItemsChanged] Same week (', newWeekStartStr, '), index may have changed but week is the same');
+      }
+      
+      setCurrentWeekDisplayRef.current(newPage.displayRange || '');
+      
+      // Check swipe limits and show toast if at boundary
+      if (prevIndex !== -1 && prevIndex !== index) {
+        const currentWeekStart = parseISO(newWeekStartStr);
+        const swipeDirection = index > prevIndex ? 'next' : 'prev';
+        
+        // Check if we've reached the limit (-2 months ~ +4 months)
+        // Use weekRange directly instead of isWeekInRange to avoid dependency
+        const { pastLimit, futureLimit } = getWeeklyCalendarRanges();
+        const prevWeekStart = addWeeks(currentWeekStart, -1);
+        const nextWeekStart = addWeeks(currentWeekStart, 1);
+        
+        if (swipeDirection === 'prev' && (prevWeekStart < pastLimit || prevWeekStart > futureLimit)) {
+          // Reached past limit (2 months)
+          showToast('info', '범위 제한', '최대로 이동하였습니다.');
+          // Bounce back to previous index (validate range first)
+          if (prevIndex >= 0 && prevIndex < currentPages.length) {
+            setTimeout(() => {
+              try {
+                flatListRefForCallback.current?.scrollToIndex({
+                  index: prevIndex,
+                  animated: true,
+                });
+              } catch (error) {
+                console.warn('[swipe limit] scrollToIndex failed:', error);
+              }
+            }, 100);
+          }
+          return;
+        } else if (swipeDirection === 'next' && (nextWeekStart < pastLimit || nextWeekStart > futureLimit)) {
+          // Reached future limit (4 months)
+          showToast('info', '범위 제한', '최대로 이동하였습니다.');
+          // Bounce back to previous index (validate range first)
+          if (prevIndex >= 0 && prevIndex < currentPages.length) {
+            setTimeout(() => {
+              try {
+                flatListRefForCallback.current?.scrollToIndex({
+                  index: prevIndex,
+                  animated: true,
+                });
+              } catch (error) {
+                console.warn('[swipe limit] scrollToIndex failed:', error);
+              }
+            }, 100);
+          }
+          return;
+        }
+      }
+      
+      // Update previousIndexRef
+      previousIndexRef.current = index;
+    }
+  }, []); // Empty dependency array - use refs for all dynamic values
+
+  const viewabilityConfig = {
+    itemVisiblePercentThreshold: 50,
+  };
+
+  // Navigation functions - Use weekStartStr as source of truth
+  const goToPreviousWeek = useCallback(() => {
+    if (!currentWeekStartStr) return;
+    
+    // Calculate previous week
+    const currentWeekStart = parseISO(currentWeekStartStr);
+    const prevWeekStart = addWeeks(currentWeekStart, -1);
+    const prevWeekStartStr = format(startOfWeek(prevWeekStart, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    
+    // Check if previous week is within range
+    if (!isWeekInRange(prevWeekStart)) {
+      showToast('info', '범위 제한', '최대 6개월까지만 이동할 수 있습니다.');
+      return;
+    }
+    
+    // Find index by weekStartStr (O(1) lookup)
+    const targetIndex = weekPagesMap.get(prevWeekStartStr);
+    
+    if (targetIndex !== undefined && targetIndex < weekPages.length) {
+      try {
+        flatListRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: true,
+        });
+        setCurrentWeekStartStr(prevWeekStartStr);
+      } catch (error) {
+        console.warn('[goToPreviousWeek] scrollToIndex failed:', error);
+      }
+    }
+  }, [currentWeekStartStr, weekPages, weekPagesMap, isWeekInRange]);
+  
+  const goToNextWeek = useCallback(() => {
+    if (!currentWeekStartStr) return;
+    
+    // Calculate next week
+    const currentWeekStart = parseISO(currentWeekStartStr);
+    const nextWeekStart = addWeeks(currentWeekStart, 1);
+    const nextWeekStartStr = format(startOfWeek(nextWeekStart, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    
+    // Check if next week is within range
+    if (!isWeekInRange(nextWeekStart)) {
+      showToast('info', '범위 제한', '최대 6개월까지만 이동할 수 있습니다.');
+      return;
+    }
+    
+    // Find index by weekStartStr (O(1) lookup)
+    const targetIndex = weekPagesMap.get(nextWeekStartStr);
+    
+    if (targetIndex !== undefined && targetIndex < weekPages.length) {
+      try {
+        flatListRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: true,
+        });
+        setCurrentWeekStartStr(nextWeekStartStr);
+      } catch (error) {
+        console.warn('[goToNextWeek] scrollToIndex failed:', error);
+      }
+    }
+  }, [currentWeekStartStr, weekPages, weekPagesMap, isWeekInRange]);
+
+  const handleNotificationPress = () => {
+    showToast('info', 'Notifications', 'Notification feature coming soon!');
+  };
+
+  const isNavigatingRef = useRef(false);
+  
+  const handleDateCardPress = useCallback((dateStr: string) => {
+    // Prevent multiple rapid presses
+    if (isNavigatingRef.current) return;
+    
+    isNavigatingRef.current = true;
+    
+    // Haptic feedback for better UX
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    
+    // Open Day modal with specific date (with shared element animation)
+    router.push({
+      pathname: '/day',
+      params: { jumpToDate: dateStr },
+    });
+    
+    // Reset navigation lock after a short delay
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 300);
+  }, [router]);
+
+  // Pull-to-Refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await initializeCalendar();
+    setRefreshing(false);
+  }, [initializeCalendar]);
+
+  // Auto-refresh on focus (silent update)
+  useFocusEffect(
+    useCallback(() => {
+      // Silently refresh when screen comes into focus
+      initializeCalendar();
+    }, [initializeCalendar])
+  );
+
+  // Handle quick add task
+  const handleQuickAdd = (dateStr: string) => {
+    if (Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+    setAddTaskInitialDate(dateStr);
+    setIsAddTaskModalVisible(true);
+  };
+
+  const renderWeekPage = ({ item, index }: { item: WeekPage; index: number }) => {
+    const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
+    
+    // CRITICAL: If this is the index that should show this week, but the item's weekStartStr doesn't match,
+    // find the correct week page from weekPagesRef
+    let weekPageToRender = item;
+    if (index === currentWeekIndex && item.weekStartStr !== currentWeekStartStr && currentWeekStartStr) {
+      // Find the correct week page by weekStartStr in the current weekPages array
+      const correctPage = weekPages.find(page => page.weekStartStr === currentWeekStartStr);
+      if (correctPage) {
+        console.log('[renderWeekPage] Correcting week page for index', index, 'from', item.weekStartStr, 'to', correctPage.weekStartStr);
+        weekPageToRender = correctPage;
+      }
+    }
+    
+    return (
+      <WeekPageComponent
+        item={weekPageToRender}
+        weekIndex={index}
+        currentWeekIndex={currentWeekIndex}
+        pageWidth={pageWidth}
+        scrollViewRefs={scrollViewRefs}
+        cardPositions={cardPositions}
+        isLoading={isLoading}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        onDateCardPress={handleDateCardPress}
+        scrollToTodayInWeek={scrollToTodayInWeek}
+        onQuickAdd={handleQuickAdd}
+        updateTaskInStore={updateTaskInStore}
+        toggleTaskCompleteInStore={toggleTaskCompleteInStore}
+        deleteTaskInStore={deleteTaskInStore}
+      />
+    );
+  };
+
+  // Calculate progress (before early returns)
+  const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+  let progressTitle = '';
+  let progressText = '';
+  let progressPercent = 0;
+  let totalTasks = 0;
+  let completedTasks = 0;
+
+  if (isCurrentWeek) {
+    // Current week: Show today's progress
+    const todayGroup = currentWeekPage?.dailyGroups.find(g => g.date === todayStr);
+    const todayTasks = todayGroup?.tasks || [];
+    completedTasks = todayTasks.filter(t => t.status === 'DONE').length;
+    totalTasks = todayTasks.length;
+    progressTitle = "Today's Progress";
+    progressText = `${completedTasks}/${totalTasks} Completed`;
+    progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  } else if (isPastWeek) {
+    // Past week: Show week's overall progress
+    const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
+    completedTasks = allWeekTasks.filter(t => t.status === 'DONE').length;
+    totalTasks = allWeekTasks.length;
+    progressTitle = "Week Progress";
+    progressText = `${completedTasks}/${totalTasks} Completed`;
+    progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  } else if (isFutureWeek) {
+    // Future week: Show upcoming tasks count
+    const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
+    totalTasks = allWeekTasks.length;
+    progressTitle = "Upcoming Tasks";
+    progressText = `${totalTasks} tasks`;
+    progressPercent = 0; // No progress for future
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Android only: Add top padding for status bar */}
+      {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
+      {/* Header */}
+      <AppHeader onNotificationPress={handleNotificationPress} />
+
+      {/* Today's Progress Card */}
+      <View 
+        style={[
+          {
+            marginHorizontal: 16,
+            marginTop: 16,
+            marginBottom: 8,
+            borderRadius: borderRadius.lg,
+            backgroundColor: colors.primary,
+            padding: 20,
+            ...shadows.lg,
+          },
+          Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' },
+        ]}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <View>
+            <Text style={{ fontSize: 14, color: colors.primaryForeground, opacity: 0.9, marginBottom: 4 }}>
+              {progressTitle}
+            </Text>
+            <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primaryForeground }}>
+              {progressText}
+            </Text>
+          </View>
+          {!isFutureWeek && (
+            <View 
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: borderRadius.full,
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ fontSize: 20, fontWeight: '700', color: colors.primaryForeground }}>
+                {progressPercent}%
+              </Text>
+            </View>
+          )}
+        </View>
+        {/* Progress Bar - Only show for current and past weeks */}
+        {!isFutureWeek && (
+          <View 
+            style={{
+              height: 8,
+              borderRadius: borderRadius.full,
+              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              overflow: 'hidden',
+            }}
+          >
+            <View 
+              style={{
+                height: '100%',
+                width: `${progressPercent}%`,
+                backgroundColor: colors.primaryForeground,
+                borderRadius: borderRadius.full,
+              }}
+            />
+          </View>
+        )}
+      </View>
+
+      {/* Week Navigator */}
+      <View 
+        style={[
+          {
+            backgroundColor: colors.card,
+            paddingHorizontal: 24,
+            paddingVertical: 14,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          },
+          Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' },
+        ]}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Previous Week Button */}
+          <Pressable
+            onPress={goToPreviousWeek}
+            disabled={isLoading}
+            style={[
+              { 
+                padding: 12, 
+                borderRadius: borderRadius.md, 
+                opacity: isLoading ? 0.5 : 1,
+                minWidth: 44,
+                minHeight: 44,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+            ]}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            pressRetentionOffset={{ top: 30, bottom: 30, left: 30, right: 30 }}
+          >
+            <ChevronLeft size={24} color={colors.textSub} strokeWidth={2} />
+          </Pressable>
+
+          {/* Week Range Display */}
+          <View style={{ alignItems: 'center', flex: 1 }}>
+            <Text style={{ fontSize: 18, fontWeight: '600', color: colors.textMain }}>
+              {currentWeekDisplay}
+            </Text>
+          </View>
+
+          {/* Next Week Button */}
+          <Pressable
+            onPress={goToNextWeek}
+            disabled={isLoading}
+            style={[
+              { 
+                padding: 12, 
+                borderRadius: borderRadius.md, 
+                opacity: isLoading ? 0.5 : 1,
+                minWidth: 44,
+                minHeight: 44,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+            ]}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            pressRetentionOffset={{ top: 30, bottom: 30, left: 30, right: 30 }}
+          >
+            <ChevronRight size={24} color={colors.textSub} strokeWidth={2} />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* Horizontal Week Paging View */}
+      <View 
+        style={{
+          flex: 1,
+          height: Platform.OS === 'web' ? AVAILABLE_HEIGHT : undefined,
+          ...(Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' }),
+        }}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={weekPages}
+          renderItem={renderWeekPage}
+          keyExtractor={(item) => item.weekStartStr}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled={true}
+          scrollEnabled={true}
+          directionalLockEnabled={false}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          getItemLayout={(data, index) => ({
+            length: Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH,
+            offset: (Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH) * index,
+            index,
+          })}
+          initialScrollIndex={2}
+          onScrollToIndexFailed={(info) => {
+            // Only retry if index is within valid range
+            if (info.index >= 0 && info.index < weekPages.length) {
+              setTimeout(() => {
+                try {
+                  flatListRef.current?.scrollToIndex({
+                    index: info.index,
+                    animated: false,
+                  });
+                } catch (error) {
+                  console.warn('[onScrollToIndexFailed] Retry failed:', error);
+                }
+              }, 100);
+            } else {
+              console.warn('[onScrollToIndexFailed] Index out of range:', info.index, 'length:', weekPages.length);
+            }
+          }}
+        />
+      </View>
+
+      {/* Add Task Modal */}
+      <AddTaskModal
+        visible={isAddTaskModalVisible}
+        onClose={() => {
+          setIsAddTaskModalVisible(false);
+          setAddTaskInitialDate(undefined);
+        }}
+        initialDate={addTaskInitialDate}
+      />
+    </SafeAreaView>
+  );
+}
+
+// Week Page Component (separate component to use hooks)
+function WeekPageComponent({
+  item,
+  weekIndex,
+  currentWeekIndex,
+  pageWidth,
+  scrollViewRefs,
+  cardPositions,
+  isLoading,
+  refreshing,
+  onRefresh,
+  onDateCardPress,
+  scrollToTodayInWeek,
+  onQuickAdd,
+  updateTaskInStore,
+  toggleTaskCompleteInStore,
+  deleteTaskInStore,
+}: {
+  item: WeekPage;
+  weekIndex: number;
+  currentWeekIndex: number;
+  pageWidth: number;
+  scrollViewRefs: React.MutableRefObject<Map<string, ScrollView>>;
+  cardPositions: React.MutableRefObject<Map<string, number>>;
+  isLoading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onDateCardPress: (date: string) => void;
+  scrollToTodayInWeek: (weekStartStr: string) => void;
+  onQuickAdd: (dateStr: string) => void;
+  updateTaskInStore: (taskId: string, updateFields: any) => Promise<{ success: boolean; error?: string }>;
+  toggleTaskCompleteInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+  deleteTaskInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+}) {
+  const scrollViewRef = useRef<ScrollView>(null);
+  const hasAutoScrolled = useRef(false); // Track if we've already auto-scrolled
+  const THIS_WEEK_INDEX = 2; // This week is always at index 2
+  
+  // Store ref for this week's ScrollView
+  useEffect(() => {
+    if (scrollViewRef.current) {
+      scrollViewRefs.current.set(item.weekStartStr, scrollViewRef.current);
+    }
+    return () => {
+      scrollViewRefs.current.delete(item.weekStartStr);
+    };
+  }, [item.weekStartStr, scrollViewRefs]);
+
+  // Auto-scroll to today ONLY ONCE on initial mount/view
+  useEffect(() => {
+    const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    const weekHasToday = item.dailyGroups.some(g => g.date === todayStr);
+    
+    // Only scroll if:
+    // - This week contains today's date
+    // - We're currently viewing this week (currentWeekIndex matches)
+    // - ScrollView ref is available
+    // - Not loading
+    // - Haven't already auto-scrolled
+    // - This is the initial 5 weeks (not full pages update)
+    if (
+      weekHasToday && 
+      currentWeekIndex === weekIndex && 
+      scrollViewRef.current && 
+      !isLoading && 
+      !hasAutoScrolled.current
+    ) {
+      const timeoutId = setTimeout(() => {
+        // Double-check we're still on the correct week before scrolling
+        if (currentWeekIndex === weekIndex && scrollViewRef.current) {
+          scrollToTodayInWeek(item.weekStartStr);
+          hasAutoScrolled.current = true; // Mark as scrolled
+        }
+      }, 400);
+      return () => clearTimeout(timeoutId);
+    }
+    
+    // Reset hasAutoScrolled if we moved to a different week
+    if (currentWeekIndex !== weekIndex) {
+      hasAutoScrolled.current = false;
+    }
+  }, [weekIndex, currentWeekIndex, item.weekStartStr, item.dailyGroups, isLoading, scrollToTodayInWeek]);
+
+  return (
+    <View 
+      style={{
+        width: pageWidth,
+        height: Platform.OS === 'web' ? AVAILABLE_HEIGHT : undefined,
+        backgroundColor: colors.background,
+        flex: Platform.OS === 'web' ? undefined : 1,
+      }}
+    >
+      {/* Weekly List (Vertical scroll inside week page) */}
+      <ScrollView 
+        ref={scrollViewRef}
+        style={Platform.OS === 'web' ? { 
+          height: AVAILABLE_HEIGHT,
+          overflow: 'auto' as any,
+        } : { flex: 1 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingVertical: 16,
+          paddingBottom: Platform.OS === 'web' ? 280 : 120, // Increased for tab bar clearance on web
+          ...(Platform.OS === 'web' 
+            ? { minHeight: 'auto', height: 'auto' } 
+            : { flexGrow: 0 }), // Web: auto height, Native: don't grow
+        }}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        scrollEnabled={true}
+        bounces={true}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled={true}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
+        {item.dailyGroups.map((group) => (
+          <DailyCard
+            key={group.date}
+            group={group}
+            onPress={() => onDateCardPress(group.date)}
+            weekStartStr={item.weekStartStr}
+            cardPositions={cardPositions}
+            onQuickAdd={onQuickAdd}
+            updateTaskInStore={updateTaskInStore}
+            toggleTaskCompleteInStore={toggleTaskCompleteInStore}
+            deleteTaskInStore={deleteTaskInStore}
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// Daily Card Component
+function DailyCard({ 
+  group, 
+  onPress,
+  weekStartStr,
+  cardPositions,
+  onQuickAdd,
+  updateTaskInStore,
+  toggleTaskCompleteInStore,
+  deleteTaskInStore,
+}: { 
+  group: DailyGroup; 
+  onPress: () => void;
+  weekStartStr: string;
+  cardPositions: React.MutableRefObject<Map<string, number>>;
+  onQuickAdd: (dateStr: string) => void;
+  updateTaskInStore: (taskId: string, updateFields: any) => Promise<{ success: boolean; error?: string }>;
+  toggleTaskCompleteInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+  deleteTaskInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+}) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { groups } = useGroupStore();
+  const { user } = useAuth();
+  
+  // Create groups map for O(1) lookup instead of O(n) find operations
+  const groupsMap = useMemo(() => {
+    const map = new Map<string, typeof groups[0]>();
+    groups.forEach(g => map.set(g.id, g));
+    return map;
+  }, [groups]);
+  const todayDate = startOfDay(new Date());
+  const today = format(todayDate, 'yyyy-MM-dd');
+  const isToday = group.date === today;
+  const isPast = group.dateObj < todayDate; // Past = before today (not including today)
+
+  // Show all tasks - ensure it's always an array
+  const visibleTasks = Array.isArray(group.tasks) ? group.tasks : [];
+
+  const handleToggleComplete = async (task: TaskWithOverdue) => {
+
+    // Haptic feedback for instant response
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Optimistic update helper
+    const updateTaskInCache = (oldData: any, updateFn: (task: any) => any) => {
+      if (!oldData) return oldData;
+      return oldData.map((t: any) => t.id === task.id ? updateFn(t) : t);
+    };
+
+    // Group task: use assignee logic
+    if (task.group_id && task.assignees) {
+      const myGroup = groupsMap.get(task.group_id);
+      const myRole = myGroup?.myRole;
+
+      if (myRole === 'OWNER' || myRole === 'ADMIN') {
+        // Owner and Admin: toggle all assignees (checkbox controls all)
+        const allCompleted = task.assignees.every(a => a.is_completed);
+        const newCompletionStatus = !allCompleted;
+
+        // Optimistically update UI for ALL matching queries
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
+            ...t,
+            assignees: t.assignees?.map((a: any) => ({
+              ...a,
+              is_completed: newCompletionStatus,
+              completed_at: newCompletionStatus ? new Date().toISOString() : null,
+            })),
+            status: newCompletionStatus ? 'DONE' : 'TODO',
+            completed_at: newCompletionStatus ? new Date().toISOString() : null,
+          }))
+        );
+
+        try {
+          const { toggleAllAssigneesCompletion, getTaskById } = await import('@/lib/api/tasks');
+          const { error } = await toggleAllAssigneesCompletion(task.id, newCompletionStatus);
+          if (error) {
+            console.error('Error toggling all assignees:', error);
+            // Revert optimistic update on error
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          } else {
+            // Fetch updated task and update store
+            const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
+            if (!fetchError && updatedTask) {
+              const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+              const tasksWithRollover = calculateRolloverInfo([updatedTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+          }
+        } catch (error) {
+          console.error('Exception toggling all assignees:', error);
+          // Revert optimistic update on exception
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+        }
+      } else {
+        // Member: toggle own status only
+        const myAssignee = task.assignees.find(a => a.user_id === user!.id);
+        if (!myAssignee) return;
+
+        const newCompletionStatus = !myAssignee.is_completed;
+
+        // Optimistically update UI for ALL matching queries
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          (oldData: any) => updateTaskInCache(oldData, (t: any) => {
+            const updatedAssignees = t.assignees?.map((a: any) =>
+              a.user_id === user!.id
+                ? { ...a, is_completed: newCompletionStatus, completed_at: newCompletionStatus ? new Date().toISOString() : null }
+                : a
+            );
+            const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
+            
+            return {
+              ...t,
+              assignees: updatedAssignees,
+              status: allCompleted ? 'DONE' : 'TODO',
+              completed_at: allCompleted ? new Date().toISOString() : null,
+            };
+          })
+        );
+
+        try {
+          const { toggleAssigneeCompletion, getTaskById } = await import('@/lib/api/tasks');
+          const { error } = await toggleAssigneeCompletion(
+            task.id,
+            user!.id,
+            myAssignee.is_completed
+          );
+          if (error) {
+            console.error('Error toggling assignee:', error);
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          } else {
+            // Fetch updated task and update store
+            const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
+            if (!fetchError && updatedTask) {
+              const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+              const tasksWithRollover = calculateRolloverInfo([updatedTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+          }
+        } catch (error) {
+          console.error('Exception toggling assignee:', error);
+          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+        }
+      }
+      return;
+    }
+
+    // Personal task: Use store function for optimistic update
+    const newStatus = task.status === 'DONE' ? 'TODO' : 'DONE';
+    const updates: any = { status: newStatus };
+
+    // If unchecking (DONE -> TODO) and task has no due_date, assign today's date
+    if (newStatus === 'TODO' && !task.due_date) {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      updates.due_date = todayStr;
+      updates.original_due_date = todayStr;
+    }
+
+    // Use store function (handles optimistic update and API call)
+    await updateTaskInStore(task.id, updates);
+  };
+
+  const handleSendToBacklog = async (task: TaskWithOverdue) => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
+    // Use store function (handles optimistic update and API call)
+    const result = await updateTaskInStore(task.id, {
+      due_date: null,
+      original_due_date: null,
+    });
+    
+    if (result.success) {
+      showToast('success', 'Moved', 'Task moved to Backlog');
+    }
+  };
+
+
+  // Measure card position when it's laid out
+  const handleLayout = useCallback((event: any) => {
+    const { y } = event.nativeEvent.layout;
+    const cardKey = `${weekStartStr}-${group.date}`;
+    cardPositions.current.set(cardKey, y);
+  }, [weekStartStr, group.date, cardPositions]);
+
+  return (
+    <Animated.View
+      onLayout={handleLayout}
+      style={[
+        styles.card as any,
+        isToday && (styles.cardToday as any),
+        isToday && { 
+          backgroundColor: '#EFF6FF', // Today card background color
+          borderColor: 'rgba(59, 130, 246, 0.3)', // border-primary/30
+          borderWidth: 2, // border-2
+          ...shadows.lg, // shadow-lg
+          shadowColor: colors.primary, // shadow-primary/10
+          shadowOpacity: 0.1,
+        },
+        !isToday && {
+          backgroundColor: colors.card, // bg-card
+          borderWidth: 1,
+          borderColor: 'rgba(229, 231, 235, 0.5)', // border-border/50
+        },
+        { 
+          ...(Platform.OS === 'web' 
+            ? { width: '100%', minHeight: 'auto' } 
+            : { flex: 0, alignSelf: 'stretch' }), // Web: explicit width, Native: flex
+        },
+      ]}
+      {...(Platform.OS !== 'web' ? { sharedTransitionTag: `day-card-${group.date}` } : {})}
+    >
+      {/* Card Header - Navigation to Day view */}
+      <Pressable
+        onPress={onPress}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        disabled={false}
+        pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+        style={[
+          {
+            padding: 16, // p-4 (v0)
+            borderTopLeftRadius: borderRadius.lg, // rounded-2xl top corners
+            borderTopRightRadius: borderRadius.lg,
+          },
+          isToday && { backgroundColor: '#EFF6FF' }, // Today background color
+        ]}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+            <Text 
+              style={{
+                fontSize: 16, // text-base
+                fontWeight: '600', // font-semibold
+                color: colors.textMain, // Dark grey to match Week Navigator
+                marginRight: 12, // gap-3 (12px)
+              }}
+            >
+              {String(group.displayDate)}
+            </Text>
+
+            {/* Today Badge */}
+            {isToday && (
+              <View 
+                style={{
+                  borderRadius: borderRadius.full, // rounded-full
+                  backgroundColor: colors.primary, // bg-primary
+                  paddingHorizontal: 10, // px-2.5
+                  paddingVertical: 2, // py-0.5
+                  marginRight: 8, // gap-2
+                }}
+              >
+                <Text style={{ 
+                  fontSize: 12, // text-xs
+                  fontWeight: '500', // font-medium
+                  color: colors.primaryForeground // text-primary-foreground
+                }}>
+                  Today
+                </Text>
+              </View>
+            )}
+
+          </View>
+
+          {/* Right side: Completion Badge and Navigation hint */}
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {/* Completion Badge */}
+            {group.totalCount > 0 ? (
+              <Text 
+                style={{
+                  fontSize: 14,
+                  color: colors.textSub,
+                  marginRight: 8,
+                }}
+              >
+                <Text style={[
+                  isToday && { color: colors.primary, fontWeight: '500' }
+                ]}>
+                  {String(group.completedCount)}
+                </Text>
+                /{String(group.totalCount)}
+              </Text>
+            ) : null}
+
+            {/* Navigation hint - Chevron */}
+            <ChevronRight size={20} color={colors.textSub} strokeWidth={2} />
+          </View>
+        </View>
+      </Pressable>
+
+      {/* Card Body - Task List */}
+      <View style={{ 
+        paddingHorizontal: 16, 
+        paddingBottom: Platform.OS === 'web' ? 24 : 16, // Extra spacing on web
+      }}>
+        {visibleTasks.length === 0 ? (
+          <View style={{ paddingVertical: 4 }}>
+            {/* Empty State with Quick Add - Only for Today and Future */}
+            {!isPast ? (
+              <View style={{
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingVertical: 20,
+                paddingHorizontal: 16,
+              }}>
+                <Text style={{
+                  fontSize: 14,
+                  color: colors.textSub,
+                  marginBottom: 12,
+                }}>
+                  No tasks scheduled
+                </Text>
+                <Pressable
+                  onPress={() => onQuickAdd(group.date)}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    borderColor: '#E2E8F0',
+                    paddingHorizontal: 20,
+                    paddingVertical: 10,
+                    borderRadius: borderRadius.md,
+                  }}
+                >
+                  <Plus size={16} color="#94A3B8" strokeWidth={2} />
+                  <Text style={{
+                    fontSize: 14,
+                    color: '#94A3B8',
+                    fontWeight: '500',
+                    marginLeft: 6,
+                  }}>
+                    Tap to add
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              <EmptyState size="sm" message="No tasks scheduled" />
+            )}
+          </View>
+        ) : (
+          <View>
+            {visibleTasks.map((task, index) => {
+              const isDone = task.status === 'DONE';
+              const isCancelled = task.status === 'CANCEL';
+              const isTodo = task.status === 'TODO';
+              const isOverdue = task.isOverdue === true && task.daysOverdue && task.daysOverdue > 0;
+              
+              // Calculate late completion
+              // Use original_due_date if available (for backlog tasks), otherwise use due_date
+              const isLateCompletion = isDone && task.completed_at 
+                ? (() => {
+                    const referenceDueDate = task.original_due_date || task.due_date;
+                    if (!referenceDueDate) return 0;
+                    
+                    const completedDate = parseISO(task.completed_at);
+                    const dueDate = parseISO(referenceDueDate);
+                    const daysLate = differenceInCalendarDays(completedDate, dueDate);
+                    return daysLate > 0 ? daysLate : 0;
+                  })()
+                : 0;
+
+              // Format time
+              const formatTime = (time: string | null) => {
+                if (!time) return null;
+                return time.substring(0, 5);
+              };
+
+              return (
+                <View
+                  key={task.id}
+                  style={[
+                    {
+                      borderRadius: borderRadius.lg, // rounded-xl (16px in v0, but using lg for consistency)
+                      marginBottom: index < visibleTasks.length - 1 ? 8 : 0, // space-y-2
+                    },
+                    isDone && {
+                      backgroundColor: '#F8FAFC', // Completed task background
+                    },
+                    !isDone && {
+                      backgroundColor: colors.card, // bg-card
+                      borderWidth: 1,
+                      borderColor: 'rgba(229, 231, 235, 0.5)', // border-border/50
+                      ...shadows.sm, // shadow-sm
+                    },
+                    isOverdue && isTodo && (styles.weekTaskCardOverdue as any),
+                  ]}
+                >
+                  <View style={{ paddingHorizontal: 12, paddingVertical: 12 }}>
+                      {/* 첫 번째 줄: 체크박스 + 제목 + 시간뱃지 + delay뱃지 */}
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+                        {/* Checkbox */}
+                        {(() => {
+                          // Check if MEMBER should have read-only checkbox
+                          const myGroup = task.group_id ? groupsMap.get(task.group_id) || null : null;
+                          const isCheckboxDisabled = !!(task.group_id && myGroup?.myRole === 'MEMBER');
+                          
+                          return (
+                            <Pressable
+                              onPress={() => handleToggleComplete(task)}
+                              disabled={isCheckboxDisabled}
+                              style={[
+                                {
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: borderRadius.full,
+                                  borderWidth: 2,
+                                  flexShrink: 0,
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  marginTop: 2, // Align with text baseline
+                                },
+                                isDone && {
+                                  backgroundColor: colors.success,
+                                  borderColor: colors.success,
+                                },
+                                isCancelled && {
+                                  backgroundColor: colors.gray300,
+                                  borderColor: colors.gray300,
+                                },
+                                !isDone && !isCancelled && {
+                                  borderColor: 'rgba(156, 163, 175, 0.3)',
+                                },
+                                isCheckboxDisabled && {
+                                  opacity: 0.5, // Visual indicator for disabled state
+                                },
+                              ]}
+                            >
+                              {isDone && (
+                                <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                              )}
+                              {isCancelled && (
+                                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>✕</Text>
+                              )}
+                            </Pressable>
+                          );
+                        })()}
+
+                        {/* Task Title + Time Badge Container */}
+                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                          {/* Task Title - 2줄까지 표시, 넘어가면 말줄임 */}
+                          <Text 
+                            numberOfLines={2} // 2줄까지 표시
+                            ellipsizeMode="tail" // 넘어가면 말줄임
+                            style={[
+                              {
+                                fontSize: 14,
+                                fontWeight: '500',
+                                flexShrink: 1,
+                                minWidth: 0, // Allow text to shrink
+                              },
+                              isDone && {
+                                color: colors.textSub,
+                                textDecorationLine: 'line-through',
+                              },
+                              isCancelled && {
+                                color: colors.textDisabled,
+                                textDecorationLine: 'line-through',
+                              },
+                              !isDone && !isCancelled && {
+                                color: colors.textMain,
+                                fontWeight: '500',
+                              },
+                            ]}
+                          >
+                            {String(task.title || '(Untitled)')}
+                          </Text>
+
+                          {/* Time Badge - 제목 바로 옆에 표시 */}
+                          {task.due_time && (
+                            <View style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              backgroundColor: '#F1F5F9', // Slate 100
+                              paddingHorizontal: 6,
+                              paddingVertical: 4,
+                              borderRadius: 6,
+                              flexShrink: 0,
+                            }}>
+                              <Clock size={10} color="#475569" strokeWidth={2} />
+                              <Text style={{
+                                fontSize: 10,
+                                fontWeight: '500',
+                                color: '#475569', // Slate 600
+                                marginLeft: 4,
+                              }}>
+                                {String(formatTime(task.due_time) || '')}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* 지연 뱃지 (같은 줄에 표시) - TODO일 때 Rollover, DONE일 때 Late Completion */}
+                        {((isOverdue && isTodo && task.daysOverdue && task.daysOverdue > 0) || (isDone && isLateCompletion > 0)) && (
+                          <View style={{
+                            backgroundColor: 'rgba(245, 158, 11, 0.2)', // bg-warning/20
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: borderRadius.sm,
+                            flexShrink: 0,
+                            marginTop: 2,
+                          }}>
+                            <Text style={{ 
+                              color: colors.textMain,
+                              fontSize: 12, 
+                              fontWeight: '500' 
+                            }}>
+                              +{isDone ? isLateCompletion : task.daysOverdue}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* 두 번째 줄: 그룹명 + 담당자이니셜 + 백로그뱃지 */}
+                      <View style={{ 
+                        flexDirection: 'row', 
+                        alignItems: 'center', 
+                        gap: 6,
+                        flexWrap: 'wrap', // Allow badges to wrap to next line
+                        marginLeft: 36, // Align with title (checkbox width + gap)
+                      }}>
+                        {/* Group Badge */}
+                        {task.group_id && (() => {
+                          const groupName = groupsMap.get(task.group_id)?.name;
+                          return groupName ? (
+                            <View style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              backgroundColor: '#F1F5F9', // Slate 100
+                              paddingHorizontal: 6,
+                              paddingVertical: 4,
+                              borderRadius: 6,
+                              flexShrink: 0,
+                            }}>
+                              <Users size={10} color="#475569" strokeWidth={2} />
+                              <Text style={{
+                                fontSize: 10,
+                                fontWeight: '500',
+                                color: '#475569', // Slate 600
+                                marginLeft: 4,
+                                maxWidth: 100, // Limit group name width
+                              }}
+                              numberOfLines={1}
+                              ellipsizeMode="tail"
+                              >
+                                {String(groupName)}
+                              </Text>
+                            </View>
+                          ) : null;
+                        })()}
+
+                        {/* Assignee Avatars (for group tasks) - show for both TODO and DONE */}
+                        {task.group_id && task.assignees && task.assignees.length > 0 && (
+                          <AssigneeAvatars
+                            taskId={task.id}
+                            groupId={task.group_id}
+                            assignees={task.assignees.map(a => ({
+                              user_id: a.user_id,
+                              nickname: a.profile?.nickname || 'Unknown',
+                              avatar_url: a.profile?.avatar_url || null,
+                              is_completed: a.is_completed,
+                              completed_at: a.completed_at,
+                            }))}
+                            size={20}
+                            showCompletionRate={false}
+                          />
+                        )}
+
+                        {/* From Backlog Badge - for DONE tasks without due_date */}
+                        {isDone && !task.due_date && (
+                          <View style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: '#F1F5F9', // Slate 100
+                            paddingHorizontal: 6,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                            flexShrink: 0,
+                          }}>
+                            <Package size={10} color="#475569" strokeWidth={2} />
+                            <Text style={{
+                              fontSize: 10,
+                              fontWeight: '500',
+                              color: '#475569', // Slate 600
+                              marginLeft: 4,
+                            }}>
+                              Backlog
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+              );
+            })}
+            {/* Footer - Quick Add Button (Only for Today and Future) */}
+            {!isPast && visibleTasks.length > 0 && (
+              <Pressable
+                onPress={() => onQuickAdd(group.date)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  marginTop: 8,
+                  borderRadius: borderRadius.md,
+                  backgroundColor: 'transparent',
+                  borderWidth: 2,
+                  borderColor: 'rgba(156, 163, 175, 0.2)',
+                  borderStyle: 'dashed',
+                }}
+              >
+                <Plus size={16} color={colors.textSub} strokeWidth={2} />
+                <Text style={{
+                  fontSize: 14,
+                  color: colors.textSub,
+                  fontWeight: '500',
+                  marginLeft: 6,
+                }}>
+                  Add a task
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+    </Animated.View>
+  );
+}
+
+// Modern Minimalist Styles
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+    // Note: minHeight: '100vh' is web-only and handled via Platform check in component
+  } as any,
+  textMain: {
+    color: colors.textMain,
+  },
+  textSub: {
+    color: colors.textSub,
+    fontSize: 14,
+  },
+  primaryButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: borderRadius.md,
+  },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(229, 231, 235, 0.5)', // border-border/50
+    ...shadows.sm,
+    overflow: 'hidden', // Ensure rounded corners are preserved
+  },
+  cardToday: {
+    // Styles applied inline for dynamic colors
+  },
+  weekTaskCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
+  },
+  weekTaskCardOverdue: {
+    backgroundColor: '#FEF2F2', // Very light red
+    borderColor: colors.error,
+  },
+});

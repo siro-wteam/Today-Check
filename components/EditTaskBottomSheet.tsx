@@ -1,18 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  Modal,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-} from 'react-native';
+import { colors } from '@/constants/colors';
+import { deleteTask, moveTaskToBacklog, updateTaskAssignees, getTaskById } from '@/lib/api/tasks';
+import { useAuth } from '@/lib/hooks/use-auth';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { useCalendarStore } from '@/lib/stores/useCalendarStore';
+import { useQueryClient } from '@tanstack/react-query';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { addDays, parse, format, isToday, isTomorrow, parseISO } from 'date-fns';
-import { Trash2 } from 'lucide-react-native';
-import { updateTask, deleteTask } from '@/lib/api/tasks';
+import { addDays, format, isToday, isTomorrow, parse, parseISO } from 'date-fns';
+import { Package, Trash2, Users } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { showToast } from '@/utils/toast';
+import { ModalCloseButton } from './ModalCloseButton';
+import * as Haptics from 'expo-haptics';
 
 interface EditTaskBottomSheetProps {
   visible: boolean;
@@ -22,141 +21,354 @@ interface EditTaskBottomSheetProps {
     title: string;
     due_date: string | null;
     due_time: string | null;
+    group_id?: string | null;
+    assignees?: Array<{ user_id: string; profile?: { nickname: string } }>;
+    status?: string; // Task status: 'TODO', 'DONE', 'CANCEL'
   };
-  onUpdate: () => void; // Callback after task is updated
-  onDateChange?: (dateStr: string) => void; // Optional callback when date changes (for navigation)
+  onUpdate: () => void;
+  onDateChange?: (dateStr: string) => void;
 }
 
 export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateChange }: EditTaskBottomSheetProps) {
+  const { groups, fetchMyGroups } = useGroupStore();
+  const { user } = useAuth();
+  const { updateTask: updateTaskInStore, mergeTasksIntoStore } = useCalendarStore();
+  const queryClient = useQueryClient();
+  
+  // Form state
   const [title, setTitle] = useState(task.title);
   const [dueDate, setDueDate] = useState<Date | null>(task.due_date ? parseISO(task.due_date) : null);
   const [dueTime, setDueTime] = useState<Date | null>(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
-
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(task.group_id || null);
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>(
+    task.assignees?.map(a => a.user_id) || []
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const prevVisibleRef = useRef(false);
   const dateInputRef = useRef<any>(null);
   const timeInputRef = useRef<any>(null);
-
-  // Reset form when task changes
+  const onDateChangeRef = useRef(onDateChange);
+  
+  // Update ref when onDateChange changes
   useEffect(() => {
-    if (visible) {
+    onDateChangeRef.current = onDateChange;
+  }, [onDateChange]);
+
+  // Fetch groups when modal opens
+  useEffect(() => {
+    if (visible && user?.id) {
+      fetchMyGroups(user.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, user?.id]); // fetchMyGroups is stable from Zustand store, no need to include in deps
+
+  // Reset form when modal opens (only when visible changes from false to true)
+  useEffect(() => {
+    if (visible && !prevVisibleRef.current) {
       setTitle(task.title);
       setDueDate(task.due_date ? parseISO(task.due_date) : null);
       setDueTime(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
-      setHasChanges(false);
+      setSelectedGroupId(task.group_id || null);
+      setSelectedAssigneeIds(task.assignees?.map(a => a.user_id) || []);
+      setShowDatePicker(false);
+      setShowTimePicker(false);
+      setIsSaving(false); // Reset saving state when modal opens
     }
-  }, [visible, task]);
-
-  // Track changes
-  useEffect(() => {
-    const titleChanged = title !== task.title;
-    const dateChanged = (dueDate ? format(dueDate, 'yyyy-MM-dd') : null) !== task.due_date;
-    const timeChanged = (dueTime ? format(dueTime, 'HH:mm:ss') : null) !== task.due_time;
-    setHasChanges(titleChanged || dateChanged || timeChanged);
-  }, [title, dueDate, dueTime, task]);
+    prevVisibleRef.current = visible;
+  }, [visible, task.title, task.due_date, task.due_time, task.group_id, task.assignees]);
 
   // 웹에서 날짜 선택기 자동 열기
   useEffect(() => {
     if (Platform.OS === 'web' && showDatePicker && dateInputRef.current) {
-      setTimeout(() => {
-        dateInputRef.current?.showPicker?.();
-      }, 100);
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(() => {
+        try {
+          dateInputRef.current?.showPicker?.();
+        } catch (error) {
+          // Fallback: focus the input if showPicker fails
+          dateInputRef.current?.focus?.();
+        }
+      });
     }
   }, [showDatePicker]);
 
   // 웹에서 시간 선택기 자동 열기
   useEffect(() => {
     if (Platform.OS === 'web' && showTimePicker && timeInputRef.current) {
-      setTimeout(() => {
-        timeInputRef.current?.showPicker?.();
-      }, 100);
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(() => {
+        try {
+          timeInputRef.current?.showPicker?.();
+        } catch (error) {
+          // Fallback: focus the input if showPicker fails
+          timeInputRef.current?.focus?.();
+        }
+      });
     }
   }, [showTimePicker]);
 
-  // 기본 시간 계산: 현재시간 + 1시간, 분은 00분
-  const getDefaultTime = () => {
-    const now = new Date();
-    const defaultTime = new Date();
-    defaultTime.setHours(now.getHours() + 1);
-    defaultTime.setMinutes(0);
-    defaultTime.setSeconds(0);
-    return defaultTime;
-  };
-
-  const handleSave = async () => {
-    if (!title.trim()) {
-      if (Platform.OS === 'web') {
-        alert('Task title cannot be empty');
-      } else {
-        Alert.alert('Error', 'Task title cannot be empty');
-      }
-      return;
+  // Check if user can edit this task
+  const canEdit = (() => {
+    if (task.group_id) {
+      const originalGroup = groups.find(g => g.id === task.group_id);
+      return originalGroup?.myRole === 'OWNER' || originalGroup?.myRole === 'ADMIN';
     }
+    return true; // Personal task: creator can edit (RLS will enforce)
+  })();
 
-    const updates: any = {
-      title: title.trim(),
-    };
+  // Check if user can delete this task (same as edit permission)
+  const canDelete = canEdit;
 
-    if (dueDate) {
-      updates.due_date = format(dueDate, 'yyyy-MM-dd');
-      updates.original_due_date = format(dueDate, 'yyyy-MM-dd');
-    } else {
-      updates.due_date = null;
-      updates.original_due_date = null;
-    }
+  // Check if task can be moved to backlog (must have due_date and be TODO status)
+  const canMoveToBacklog = task.due_date !== null && task.due_date !== undefined && task.status === 'TODO';
 
-    if (dueTime) {
-      updates.due_time = format(dueTime, 'HH:mm:ss');
-    } else {
-      updates.due_time = null;
-    }
+  // Check if selected group allows editing (for group switching)
+  const canEditSelectedGroup = selectedGroupId
+    ? (groups.find(g => g.id === selectedGroupId)?.myRole === 'OWNER' || groups.find(g => g.id === selectedGroupId)?.myRole === 'ADMIN')
+    : true; // Personal task
 
-    await updateTask({ id: task.id, ...updates });
-    onUpdate();
+  // Get the currently selected group
+  const currentGroup = selectedGroupId
+    ? groups.find(g => g.id === selectedGroupId)
+    : null;
+
+  const handleClose = () => {
+    setIsSaving(false); // Reset saving state when closing
     onClose();
   };
 
   const handleDelete = async () => {
-    await deleteTask(task.id);
-    onUpdate();
-    onClose();
+    if (!canDelete) {
+      showToast('error', 'Permission Denied', 'Only group owners can delete group tasks');
+      return;
+    }
+
+    // Confirm deletion
+    if (Platform.OS === 'web') {
+      const confirmed = confirm('Are you sure you want to delete this task?');
+      if (!confirmed) return;
+    } else {
+      Alert.alert(
+        'Delete Task',
+        'Are you sure you want to delete this task? This action cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              await performDelete();
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    await performDelete();
+  };
+
+  const performDelete = async () => {
+    try {
+      const { error } = await deleteTask(task.id);
+      
+      if (error) {
+        throw error;
+      }
+
+      // Success - close modal and trigger update
+      handleClose();
+      
+      // Delay onUpdate to ensure modal is closed first
+      setTimeout(() => {
+        onUpdate();
+      }, 200);
+    } catch (error: any) {
+      showToast('error', 'Delete Failed', error.message);
+    }
+  };
+
+  const handleMoveToBacklog = async () => {
+    if (!canMoveToBacklog) {
+      showToast('error', 'Cannot Move', 'This task cannot be moved to backlog');
+      return;
+    }
+
+    try {
+      const { error } = await moveTaskToBacklog(task.id);
+      
+      if (error) {
+        throw error;
+      }
+
+      // Success - close modal and trigger update
+      handleClose();
+      
+      // Delay onUpdate to ensure modal is closed first
+      setTimeout(() => {
+        onUpdate();
+      }, 200);
+    } catch (error: any) {
+      showToast('error', 'Move Failed', error.message);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!title.trim()) {
+      showToast('error', 'Required', 'Please enter a title');
+      return;
+    }
+
+    if (!canEdit) {
+      showToast('error', 'Permission Denied', 'Only group owners can edit group tasks');
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      // Format dates
+      const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
+      const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
+
+      // Update task basic info with optimistic update
+      const updateResult = await updateTaskInStore(task.id, {
+        title: title.trim(),
+        due_date: dueDateStr,
+        due_time: dueTimeStr,
+        group_id: selectedGroupId,
+      });
+
+      if (!updateResult.success) {
+        throw new Error(updateResult.error || 'Failed to update task');
+      }
+
+      // Update assignees if group task
+      if (selectedGroupId) {
+        const { error: assigneeError } = await updateTaskAssignees(
+          task.id,
+          selectedAssigneeIds
+        );
+
+        if (assigneeError) {
+          throw assigneeError;
+        }
+      } else {
+        // Personal task - remove all assignees if switching from group to personal
+        if (task.group_id) {
+          const { error: assigneeError } = await updateTaskAssignees(task.id, []);
+          if (assigneeError) {
+            throw assigneeError;
+          }
+        }
+      }
+
+      // After assignees update, fetch the complete updated task and merge into store
+      const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
+      if (!fetchError && updatedTask) {
+        const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+        const tasksWithRollover = calculateRolloverInfo([updatedTask]);
+        mergeTasksIntoStore(tasksWithRollover);
+        
+        // Also update React Query cache
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          (oldData: any) => {
+            if (!oldData) return oldData;
+            return oldData.map((t: any) => t.id === task.id ? updatedTask : t);
+          }
+        );
+      }
+
+      // Success - close modal
+      handleClose();
+      
+      // onUpdate callback is optional (for backward compatibility)
+      if (onUpdate) {
+        setTimeout(() => {
+          onUpdate();
+        }, 200);
+      }
+    } catch (error: any) {
+      setIsSaving(false);
+      showToast('error', 'Save Failed', error.message);
+    }
+  };
+
+  const handleGroupSelect = (groupId: string | null) => {
+    if (!canEdit) return;
+    
+    // Toggle: if already selected, deselect it
+    if (selectedGroupId === groupId) {
+      setSelectedGroupId(null);
+      setSelectedAssigneeIds([]);
+      return;
+    }
+    
+    // Check if user can edit the selected group
+    if (groupId && !canEditSelectedGroup) {
+      return; // Don't allow selection if user is not OWNER
+    }
+    
+    // Select this group (only one group can be selected)
+    setSelectedGroupId(groupId);
+    // Reset assignees when changing group
+    setSelectedAssigneeIds([]);
+  };
+
+  // Toggle assignee selection
+  const toggleAssignee = (userId: string) => {
+    if (!canEdit) return;
+    
+    const isCurrentlySelected = selectedAssigneeIds.includes(userId);
+    
+    if (isCurrentlySelected) {
+      setSelectedAssigneeIds(prev => prev.filter(id => id !== userId));
+    } else {
+      setSelectedAssigneeIds(prev => [...prev, userId]);
+    }
   };
 
   const handleQuickDate = (date: Date | null) => {
-    // DatePicker가 열려있으면 닫기
     setShowDatePicker(false);
     setShowTimePicker(false);
 
+    if (!date) {
+      setDueDate(null);
+      setDueTime(null);
+      return;
+    }
+
+    // Prevent past dates
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(date);
+    selectedDate.setHours(0, 0, 0, 0);
+
+    if (selectedDate < today) {
+      showToast('error', '날짜 선택', '과거 날짜는 선택할 수 없습니다.');
+      return;
+    }
+
     if (dueDate && date) {
-      // 날짜만 비교 (시간 제외)
       const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
       const targetDateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       
       if (dueDateOnly.getTime() === targetDateOnly.getTime()) {
-        // 같은 날짜를 다시 클릭하면 토글 (백로그로 변경)
         setDueDate(null);
-        setDueTime(null); // 날짜 해제 시 시간도 초기화
+        setDueTime(null);
         return;
       }
     }
     
-    const newDate = date;
-    setDueDate(newDate);
-    
-    // If date changed, notify parent for navigation
-    if (onDateChange && newDate) {
-      const dateStr = format(newDate, 'yyyy-MM-dd');
-      if (task.due_date !== dateStr) {
-        onDateChange(dateStr);
-      }
-    }
+    setDueDate(date);
   };
 
   const isDateSelected = (targetDate: Date | null) => {
     if (!dueDate || !targetDate) return false;
     
-    // 날짜만 비교 (시간 제외)
     const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
     const targetDateOnly = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
     
@@ -166,7 +378,6 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   const getDateButtonText = () => {
     if (!dueDate) return '📅 Pick Date';
     
-    // Check if today or tomorrow in local timezone
     const today = new Date();
     const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const dueDateOnly = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
@@ -179,16 +390,25 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
     return format(dueDate, 'MMM d');
   };
 
+  const getDefaultTime = () => {
+    const now = new Date();
+    const defaultTime = new Date();
+    defaultTime.setHours(now.getHours() + 1);
+    defaultTime.setMinutes(0);
+    defaultTime.setSeconds(0);
+    return defaultTime;
+  };
+
   return (
     <Modal
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
       <Pressable
         className="flex-1 bg-black/50 justify-end"
-        onPress={onClose}
+        onPress={handleClose}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -200,17 +420,94 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 <Text className="text-xl font-bold text-gray-900 dark:text-white">
                   Edit Task
                 </Text>
-                <View className="flex-row items-center gap-3">
+                <View className="flex-row items-center gap-4">
+                  {/* Move to Backlog Button */}
+                  {canMoveToBacklog && (
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        }
+                        handleMoveToBacklog();
+                      }}
+                      className="p-2"
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Package size={20} color={colors.textSub || '#6b7280'} strokeWidth={2} />
+                    </Pressable>
+                  )}
                   {/* Delete Button */}
-                  <Pressable onPress={handleDelete}>
-                    <Trash2 size={24} color="#EF4444" strokeWidth={2} />
-                  </Pressable>
+                  {canDelete && (
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+                        }
+                        handleDelete();
+                      }}
+                      className="p-2"
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Trash2 size={20} color={colors.destructive || '#ef4444'} strokeWidth={2} />
+                    </Pressable>
+                  )}
                   {/* Close Button */}
-                  <Pressable onPress={onClose}>
-                    <Text className="text-gray-500 dark:text-gray-400 text-2xl">×</Text>
-                  </Pressable>
+                  <ModalCloseButton onPress={handleClose} />
                 </View>
               </View>
+
+              {/* Permission Warning */}
+              {!canEdit && (
+                <View className="bg-yellow-50 dark:bg-yellow-900/20 rounded-xl px-4 py-3 mb-4">
+                  <Text className="text-yellow-800 dark:text-yellow-200 text-sm">
+                    ⚠️ Only group owners can edit group tasks
+                  </Text>
+                </View>
+              )}
+
+              {/* Group Selector */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                className="mb-4"
+              >
+                <View className="flex-row gap-2">
+                  {/* Group buttons - only show groups where user is OWNER or ADMIN */}
+                  {groups
+                    .filter(group => group.myRole === 'OWNER' || group.myRole === 'ADMIN')
+                    .map(group => (
+                      <Pressable
+                        key={group.id}
+                        onPress={() => {
+                          if (Platform.OS === 'ios') {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                          }
+                          handleGroupSelect(group.id);
+                        }}
+                        disabled={!canEdit}
+                        className={`px-4 py-2 rounded-full flex-row items-center gap-2 ${
+                          selectedGroupId === group.id
+                            ? 'bg-blue-600'
+                            : 'bg-gray-100 dark:bg-gray-800'
+                        } ${!canEdit ? 'opacity-50' : ''}`}
+                      >
+                        <Users 
+                          size={14} 
+                          color={selectedGroupId === group.id ? '#ffffff' : colors.textSub} 
+                        />
+                        <Text
+                          className={`font-semibold ${
+                            selectedGroupId === group.id
+                              ? 'text-white'
+                              : 'text-gray-700 dark:text-gray-300'
+                          }`}
+                        >
+                          {group.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                </View>
+              </ScrollView>
 
               {/* Title Input */}
               <TextInput
@@ -219,19 +516,87 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 placeholderTextColor="#9ca3af"
                 value={title}
                 onChangeText={setTitle}
-                autoFocus
+                editable={canEdit}
               />
+
+              {/* Assignee Bar (only for group tasks) */}
+              {selectedGroupId && currentGroup && (
+                <View className="mb-4">
+                  <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    Assign to:
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                  >
+                    <View className="flex-row gap-3">
+                      {currentGroup.members.map(member => {
+                        const isSelected = selectedAssigneeIds.includes(member.id);
+                        const isCurrentUser = member.id === user?.id;
+                        
+                        return (
+                          <Pressable
+                            key={member.id}
+                            onPress={() => {
+                              if (Platform.OS === 'ios') {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                              }
+                              toggleAssignee(member.id);
+                            }}
+                            disabled={!canEdit}
+                            className={`px-4 py-2 rounded-full flex-row items-center gap-2 border-2 ${
+                              isSelected
+                                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600'
+                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                            } ${!canEdit ? 'opacity-50' : ''}`}
+                          >
+                            <View 
+                              className="w-6 h-6 rounded-full items-center justify-center"
+                              style={{ backgroundColor: member.profileColor }}
+                            >
+                              <Text className="text-white text-xs font-bold">
+                                {member.name.charAt(0).toUpperCase()}
+                              </Text>
+                            </View>
+                            
+                            <Text
+                              className={`font-semibold ${
+                                isSelected
+                                  ? 'text-blue-600 dark:text-blue-400'
+                                  : 'text-gray-700 dark:text-gray-300'
+                              }`}
+                            >
+                              {member.name} {isCurrentUser ? '(Me)' : ''}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                  
+                  {selectedAssigneeIds.length > 0 && (
+                    <Text className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      {selectedAssigneeIds.length} {selectedAssigneeIds.length === 1 ? 'person' : 'people'} selected
+                    </Text>
+                  )}
+                </View>
+              )}
 
               {/* Quick Date Chips */}
               <View className="flex-row gap-2 mb-4">
-                {/* Today button */}
                 <Pressable
-                  onPress={() => handleQuickDate(new Date())}
+                  onPress={() => {
+                    if (Platform.OS === 'ios') {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    }
+                    handleQuickDate(new Date());
+                  }}
+                  disabled={!canEdit}
                   className={`px-4 py-2 rounded-full ${
                     isDateSelected(new Date())
                       ? 'bg-blue-600'
                       : 'bg-gray-100 dark:bg-gray-800'
-                  }`}
+                  } ${!canEdit ? 'opacity-50' : ''}`}
                 >
                   <Text
                     className={`font-semibold ${
@@ -244,14 +609,19 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                   </Text>
                 </Pressable>
 
-                {/* Tomorrow button */}
                 <Pressable
-                  onPress={() => handleQuickDate(addDays(new Date(), 1))}
+                  onPress={() => {
+                    if (Platform.OS === 'ios') {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    }
+                    handleQuickDate(addDays(new Date(), 1));
+                  }}
+                  disabled={!canEdit}
                   className={`px-4 py-2 rounded-full ${
                     isDateSelected(addDays(new Date(), 1))
                       ? 'bg-blue-600'
                       : 'bg-gray-100 dark:bg-gray-800'
-                  }`}
+                  } ${!canEdit ? 'opacity-50' : ''}`}
                 >
                   <Text
                     className={`font-semibold ${
@@ -264,14 +634,19 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                   </Text>
                 </Pressable>
 
-                {/* Pick date button */}
                 <Pressable
-                  onPress={() => setShowDatePicker(true)}
+                  onPress={() => {
+                    if (Platform.OS === 'ios') {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    }
+                    setShowDatePicker(true);
+                  }}
+                  disabled={!canEdit}
                   className={`px-4 py-2 rounded-full ${
                     dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
                       ? 'bg-blue-600'
                       : 'bg-gray-100 dark:bg-gray-800'
-                  }`}
+                  } ${!canEdit ? 'opacity-50' : ''}`}
                 >
                   <Text
                     className={`font-semibold ${
@@ -287,11 +662,17 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 </Pressable>
               </View>
 
-              {/* Time Selection (only if date is selected AND date picker is closed) */}
-              {dueDate && !showDatePicker && (
+              {/* Time Selection */}
+              {dueDate && (
                 <Pressable
-                  onPress={() => setShowTimePicker(true)}
-                  className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 mb-4"
+                  onPress={() => {
+                    if (Platform.OS === 'ios') {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    }
+                    setShowTimePicker(true);
+                  }}
+                  disabled={!canEdit}
+                  className={`bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 mb-4 ${!canEdit ? 'opacity-50' : ''}`}
                 >
                   <Text className="text-gray-700 dark:text-gray-300">
                     {dueTime ? `⏰ ${format(dueTime, 'HH:mm')}` : '⏰ Pick Time (Optional)'}
@@ -299,103 +680,221 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 </Pressable>
               )}
 
-              {/* DateTimePicker - Native iOS (Inline Spinner) */}
-              {Platform.OS === 'ios' && showDatePicker && (
-                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4">
-                  <DateTimePicker
-                    value={dueDate || new Date()} // Default: today
-                    mode="date"
-                    display="spinner"
-                    onChange={(event, selectedDate) => {
-                      if (selectedDate) {
-                        const newDate = selectedDate;
-                        setDueDate(newDate);
+              {/* DateTimePicker - Web (HTML Input) - Always rendered but hidden */}
+              {Platform.OS === 'web' && (
+                <>
+                  <input
+                    ref={dateInputRef}
+                    type="date"
+                    value={dueDate ? format(dueDate, 'yyyy-MM-dd') : ''}
+                    min={format(new Date(), 'yyyy-MM-dd')} // Prevent past dates
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const selected = parseISO(e.target.value);
+                        // Double check: ensure selected date is not in the past
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const selectedDate = new Date(selected);
+                        selectedDate.setHours(0, 0, 0, 0);
                         
-                        // If date changed, notify parent for navigation
-                        if (onDateChange) {
-                          const dateStr = format(newDate, 'yyyy-MM-dd');
-                          if (task.due_date !== dateStr) {
-                            onDateChange(dateStr);
+                        if (selectedDate >= today) {
+                          setDueDate(selected);
+                          // If date changed, notify parent for navigation
+                          if (onDateChangeRef.current && e.target.value) {
+                            const dateStr = e.target.value;
+                            if (task.due_date !== dateStr) {
+                              onDateChangeRef.current(dateStr);
+                            }
                           }
+                        } else {
+                          showToast('error', '날짜 선택', '과거 날짜는 선택할 수 없습니다.');
                         }
                       }
+                      setShowDatePicker(false);
                     }}
-                    minimumDate={new Date()}
+                    onBlur={() => setShowDatePicker(false)}
+                    style={{
+                      position: 'absolute',
+                      opacity: 0,
+                      width: 0,
+                      height: 0,
+                      pointerEvents: 'none',
+                      zIndex: -1,
+                    }}
                   />
-                  <View className="flex-row gap-3 mt-4">
+                  {showDatePicker && (
+                    <View className="mb-4">
+                      <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                        날짜를 선택하세요 (과거 날짜는 선택할 수 없습니다)
+                      </Text>
+                    </View>
+                  )}
+                  {/* Hidden input for time picker - always rendered */}
+                  <input
+                    ref={timeInputRef}
+                    type="time"
+                    value={dueTime ? format(dueTime, 'HH:mm') : ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const [hours, minutes] = e.target.value.split(':');
+                        const selected = new Date();
+                        selected.setHours(parseInt(hours, 10));
+                        selected.setMinutes(parseInt(minutes, 10));
+                        selected.setSeconds(0);
+                        setDueTime(selected);
+                      }
+                      setShowTimePicker(false);
+                    }}
+                    onBlur={() => setShowTimePicker(false)}
+                    style={{
+                      position: 'absolute',
+                      opacity: 0,
+                      width: 0,
+                      height: 0,
+                      pointerEvents: 'none',
+                      zIndex: -1,
+                    }}
+                  />
+                  {showTimePicker && (
+                    <View className="mb-4">
+                      <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                        시간을 선택하세요
+                      </Text>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {/* DateTimePicker - Native iOS (Calendar) */}
+              {Platform.OS === 'ios' && showDatePicker && (
+                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-2 mb-4" style={{ maxHeight: 350 }}>
+                  <View style={{ transform: [{ scale: 0.85 }], marginTop: -10, marginBottom: -10 }}>
+                    <DateTimePicker
+                      value={dueDate || new Date()}
+                      mode="date"
+                      display="inline"
+                      accentColor="#2563eb" // Blue-600
+                      minimumDate={new Date()} // Prevent past dates
+                      onChange={(event, selectedDate) => {
+                        if (selectedDate) {
+                          // Double check: ensure selected date is not in the past
+                          const today = new Date();
+                          today.setHours(0, 0, 0, 0);
+                          const selected = new Date(selectedDate);
+                          selected.setHours(0, 0, 0, 0);
+                          
+                          if (selected >= today) {
+                            setDueDate(selectedDate);
+                          } else {
+                            showToast('error', '날짜 선택', '과거 날짜는 선택할 수 없습니다.');
+                          }
+                        }
+                      }}
+                    />
+                  </View>
+                  <View className="flex-row gap-3 mt-2">
                     <Pressable
                       onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        }
                         setDueDate(null);
+                        setDueTime(null);
                         setShowDatePicker(false);
                       }}
-                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-4 items-center border border-gray-200 dark:border-gray-700"
+                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
                     >
                       <Text className="text-gray-700 dark:text-gray-300 font-semibold">
                         Cancel
                       </Text>
                     </Pressable>
                     <Pressable
-                      onPress={() => setShowDatePicker(false)}
-                      className="flex-1 bg-blue-600 rounded-xl py-4 items-center"
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        }
+                        setShowDatePicker(false);
+                      }}
+                      className="flex-1 bg-blue-600 rounded-xl py-3 items-center"
                     >
-                      <Text className="text-white font-semibold">Confirm</Text>
+                      <Text className="text-white font-semibold">Apply</Text>
                     </Pressable>
                   </View>
                 </View>
               )}
 
               {Platform.OS === 'ios' && showTimePicker && (
-                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4">
-                  <DateTimePicker
-                    value={dueTime || getDefaultTime()} // Default: current time + 1 hour, 00 min
-                    mode="time"
-                    display="spinner"
-                    minuteInterval={5} // 5-minute intervals
-                    onChange={(event, selectedTime) => {
-                      if (selectedTime) {
-                        setDueTime(selectedTime);
-                      }
-                    }}
-                  />
-                  <View className="flex-row gap-3 mt-4">
+                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-2 mb-4" style={{ maxHeight: 250 }}>
+                  <View style={{ transform: [{ scale: 0.85 }], marginTop: -10, marginBottom: -10 }}>
+                    <DateTimePicker
+                      value={dueTime || getDefaultTime()}
+                      mode="time"
+                      display="spinner"
+                      minuteInterval={5}
+                      onChange={(event, selectedTime) => {
+                        if (selectedTime) {
+                          setDueTime(selectedTime);
+                        }
+                      }}
+                    />
+                  </View>
+                  <View className="flex-row gap-3 mt-2">
                     <Pressable
                       onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        }
                         setDueTime(null);
                         setShowTimePicker(false);
                       }}
-                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-4 items-center border border-gray-200 dark:border-gray-700"
+                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
                     >
                       <Text className="text-gray-700 dark:text-gray-300 font-semibold">
-                        Remove Time
+                        Cancel
                       </Text>
                     </Pressable>
                     <Pressable
-                      onPress={() => setShowTimePicker(false)}
-                      className="flex-1 bg-blue-600 rounded-xl py-4 items-center"
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        }
+                        setShowTimePicker(false);
+                      }}
+                      className="flex-1 bg-blue-600 rounded-xl py-3 items-center"
                     >
-                      <Text className="text-white font-semibold">Confirm</Text>
+                      <Text className="text-white font-semibold">Apply</Text>
                     </Pressable>
                   </View>
                 </View>
               )}
 
-              {/* DateTimePicker - Android (Dialog) */}
+              {/* DateTimePicker - Android */}
               {Platform.OS === 'android' && showDatePicker && (
                 <DateTimePicker
                   value={dueDate || new Date()}
                   mode="date"
                   display="default"
+                  minimumDate={new Date()} // Prevent past dates
                   onChange={(event, selectedDate) => {
                     setShowDatePicker(false);
                     if (event.type === 'set' && selectedDate) {
-                      setDueDate(selectedDate);
+                      // Double check: ensure selected date is not in the past
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const selected = new Date(selectedDate);
+                      selected.setHours(0, 0, 0, 0);
                       
-                      // If date changed, notify parent for navigation
-                      if (onDateChange) {
-                        const dateStr = format(selectedDate, 'yyyy-MM-dd');
-                        if (task.due_date !== dateStr) {
-                          onDateChange(dateStr);
+                      if (selected >= today) {
+                        setDueDate(selectedDate);
+                        // If date changed, notify parent for navigation
+                        if (onDateChangeRef.current) {
+                          const dateStr = format(selectedDate, 'yyyy-MM-dd');
+                          if (task.due_date !== dateStr) {
+                            onDateChangeRef.current(dateStr);
+                          }
                         }
+                      } else {
+                        showToast('error', '날짜 선택', '과거 날짜는 선택할 수 없습니다.');
                       }
                     }
                   }}
@@ -417,74 +916,18 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 />
               )}
 
-              {/* DateTimePicker - Web (HTML Input) */}
-              {Platform.OS === 'web' && showDatePicker && (
-                <View className="mb-4">
-                  <input
-                    ref={dateInputRef}
-                    type="date"
-                    defaultValue={dueDate ? format(dueDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        const selected = parse(e.target.value, 'yyyy-MM-dd', new Date());
-                        setDueDate(selected);
-                        
-                        // If date changed, notify parent for navigation
-                        if (onDateChange) {
-                          const dateStr = e.target.value;
-                          if (task.due_date !== dateStr) {
-                            onDateChange(dateStr);
-                          }
-                        }
-                      }
-                      setShowDatePicker(false);
-                    }}
-                    onBlur={() => setShowDatePicker(false)}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      borderRadius: '12px',
-                      border: '1px solid #d1d5db',
-                      fontSize: '16px',
-                    }}
-                  />
-                </View>
-              )}
-
-              {Platform.OS === 'web' && showTimePicker && (
-                <View className="mb-4">
-                  <input
-                    ref={timeInputRef}
-                    type="time"
-                    defaultValue={dueTime ? format(dueTime, 'HH:mm') : format(getDefaultTime(), 'HH:mm')}
-                    step="300"
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        const [hours, minutes] = e.target.value.split(':');
-                        const selected = new Date();
-                        selected.setHours(parseInt(hours), parseInt(minutes), 0);
-                        setDueTime(selected);
-                      }
-                      setShowTimePicker(false);
-                    }}
-                    onBlur={() => setShowTimePicker(false)}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      borderRadius: '12px',
-                      border: '1px solid #d1d5db',
-                      fontSize: '16px',
-                    }}
-                  />
-                </View>
-              )}
-
               {/* Action Buttons - DatePicker가 열려있지 않을 때만 표시 */}
               {!showDatePicker && !showTimePicker && (
                 <View className="flex-row gap-3 mt-2">
                   <Pressable
-                    onPress={onClose}
+                    onPress={() => {
+                      if (Platform.OS === 'ios') {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      }
+                      handleClose();
+                    }}
                     className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl py-4 items-center"
+                    disabled={isSaving}
                   >
                     <Text className="text-gray-700 dark:text-gray-300 font-semibold">
                       Cancel
@@ -492,14 +935,19 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                   </Pressable>
 
                   <Pressable
-                    onPress={handleSave}
+                    onPress={() => {
+                      if (Platform.OS === 'ios') {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                      }
+                      handleSave();
+                    }}
                     className={`flex-1 bg-blue-600 rounded-xl py-4 items-center ${
-                      !hasChanges ? 'opacity-50' : ''
+                      isSaving ? 'opacity-50' : ''
                     }`}
-                    disabled={!hasChanges}
+                    disabled={isSaving || !canEdit}
                   >
                     <Text className="text-white font-semibold">
-                      Save
+                      {isSaving ? 'Saving...' : 'Save'}
                     </Text>
                   </Pressable>
                 </View>
