@@ -151,3 +151,30 @@ export interface Group {
   updatedAt: string; // ISO timestamp
   myRole?: GroupRole; // Current user's role in this group (OWNER | MEMBER)
 }
+
+// Notification Types
+export type NotificationType = 
+  | 'TASK_ASSIGNED'
+  | 'TASK_COMPLETED'
+  | 'GROUP_INVITE'
+  | 'GROUP_JOINED'
+  | 'GROUP_KICKED'
+  | 'GROUP_ROLE_CHANGED';
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  actor_id: string | null;
+  group_id: string | null;
+  type: NotificationType;
+  title: string;
+  body: string;
+  target_id: string | null;
+  is_read: boolean;
+  created_at: string;
+  // Joined data (optional)
+  actor?: {
+    nickname: string;
+    avatar_url: string | null;
+  };
+}

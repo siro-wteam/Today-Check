@@ -3,6 +3,9 @@ import { JoinGroupModal } from '@/components/JoinGroupModal';
 import { borderRadius, colors, shadows } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { showToast } from '@/utils/toast';
+import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Crown, Plus, UserPlus, Users } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -16,10 +19,7 @@ import {
     Text,
     View,
 } from 'react-native';
-import { showToast } from '@/utils/toast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
 
 export default function GroupScreen() {
   const router = useRouter();
@@ -114,33 +114,27 @@ export default function GroupScreen() {
         <View style={styles.headerActions}>
           <Pressable
             onPress={() => {
-              if (isActioningRef.current) return;
-              isActioningRef.current = true;
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               setIsJoinModalVisible(true);
-              setTimeout(() => { isActioningRef.current = false; }, 100);
             }}
-            style={styles.joinButton}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            delayPressIn={0}
-            delayPressOut={0}
-            pressRetentionOffset={{ top: 50, bottom: 50, left: 50, right: 50 }}
+            style={({ pressed }) => [
+              styles.joinButton,
+              pressed && { opacity: 0.7 },
+            ]}
+            hitSlop={{ top: 24, bottom: 24, left: 24, right: 24 }}
           >
             <UserPlus size={20} color={colors.primary} strokeWidth={2} />
           </Pressable>
           <Pressable
             onPress={() => {
-              if (isActioningRef.current) return;
-              isActioningRef.current = true;
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               setIsCreateModalVisible(true);
-              setTimeout(() => { isActioningRef.current = false; }, 100);
             }}
-            style={styles.addButton}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            delayPressIn={0}
-            delayPressOut={0}
-            pressRetentionOffset={{ top: 50, bottom: 50, left: 50, right: 50 }}
+            style={({ pressed }) => [
+              styles.addButton,
+              pressed && { opacity: 0.7 },
+            ]}
+            hitSlop={{ top: 24, bottom: 24, left: 24, right: 24 }}
           >
             <Plus size={24} color={colors.primary} strokeWidth={2} />
           </Pressable>

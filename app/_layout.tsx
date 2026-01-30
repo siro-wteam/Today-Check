@@ -166,6 +166,13 @@ export default function RootLayout() {
     setQueryClientForGroupStore(queryClient);
   }, []);
 
+  // Initialize notifications on app startup
+  useEffect(() => {
+    import('@/lib/utils/task-notifications').then(({ initializeNotifications }) => {
+      initializeNotifications().catch(console.error);
+    });
+  }, []);
+
   // Show loading indicator while fonts are loading
   if (!fontsLoaded && !fontError) {
     return (

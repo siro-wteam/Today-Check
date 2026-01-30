@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# iOS 기기에서 앱 실행 스크립트 (IP 자동 감지)
+# iOS 기기에서 앱 실행 스크립트 (IP 자동 감지 + Metro bundler 자동 시작)
 # 사용법: ./scripts/run-ios-device.sh
 
 # IP 주소 자동 감지
@@ -15,6 +15,8 @@ fi
 
 echo "✅ 감지된 IP 주소: $IP"
 echo "🚀 iOS 기기에서 앱 실행 중..."
+echo "📦 Metro bundler가 자동으로 시작됩니다..."
 
 # IP 주소를 환경 변수로 설정하고 실행
+# npx expo run:ios --device는 자동으로 Metro bundler를 시작합니다
 REACT_NATIVE_PACKAGER_HOSTNAME=$IP npx expo run:ios --device

@@ -1,5 +1,6 @@
 import { AppHeader } from '@/components/AppHeader';
 import { EditNicknameModal } from '@/components/EditNicknameModal';
+import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { signOut, useAuth } from '@/lib/hooks/use-auth';
 import { Edit2, LogOut, Mail, User as UserIcon } from 'lucide-react-native';
 import { useState } from 'react';
@@ -9,9 +10,10 @@ import { colors, borderRadius, spacing } from '@/constants/colors';
 export default function ProfileScreen() {
   const { user, profile, updateProfile } = useAuth();
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
 
   const handleNotificationPress = () => {
-    Alert.alert('Notifications', 'Notification feature coming soon!');
+    setIsNotificationModalVisible(true);
   };
 
   const handleSignOut = async () => {
@@ -19,10 +21,7 @@ export default function ProfileScreen() {
       const confirmed = window.confirm('Are you sure you want to sign out?');
       if (!confirmed) return;
       
-      const { error } = await signOut();
-      if (error) {
-        alert('Failed to sign out: ' + error.message);
-      }
+      await signOut();
     } else {
       Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
         { text: 'Cancel', style: 'cancel' },
@@ -30,10 +29,7 @@ export default function ProfileScreen() {
           text: 'Sign Out',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await signOut();
-            if (error) {
-              Alert.alert('Error', 'Failed to sign out: ' + error.message);
-            }
+            await signOut();
           },
         },
       ]);
@@ -278,6 +274,12 @@ export default function ProfileScreen() {
         currentNickname={profile?.nickname || user?.email?.split('@')[0] || 'User'}
         onClose={() => setIsEditModalVisible(false)}
         onSave={updateProfile}
+      />
+      
+      {/* Notification Center Modal */}
+      <NotificationCenterModal
+        visible={isNotificationModalVisible}
+        onClose={() => setIsNotificationModalVisible(false)}
       />
     </SafeAreaView>
   );

@@ -19,6 +19,8 @@ import { calculateRolloverInfo } from '../api/tasks';
 import { showToast } from '../../utils/toast';
 import * as Haptics from 'expo-haptics';
 import { queryClient } from '../query-client';
+import { scheduleTaskNotification, cancelAllNotificationsForTask, updateTaskNotification } from '../utils/task-notifications';
+import { supabase } from '../supabase';
 
 interface CalendarState {
   // Data
@@ -34,9 +36,10 @@ interface CalendarState {
   isInitialized: boolean;
   
   // Actions
-  initializeCalendar: () => Promise<void>;
+  initializeCalendar: (force?: boolean) => Promise<void>;
   prefetchRemainingRange: () => Promise<void>;
   setSelectedDate: (date: Date) => void;
+  resetInitialization: () => void; // Reset isInitialized to force re-initialization
   
   // Optimistic updates
   updateTask: (taskId: string, updateFields: Partial<UpdateTaskInput>) => Promise<{ success: boolean; error?: string }>;
@@ -60,10 +63,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   /**
    * Initialize calendar: Load initial range (-2 weeks ~ +2 weeks, 5 weeks total)
    * Fast initial display for user
+   * @param force - If true, re-initialize even if already initialized
    */
-  initializeCalendar: async () => {
+  initializeCalendar: async (force: boolean = false) => {
     const state = get();
-    if (state.isInitialized) return;
+    if (state.isInitialized && !force) return;
     
     set({ isLoading: true, error: null });
     
@@ -95,6 +99,14 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     } catch (error: any) {
       set({ isLoading: false, error: error.message || 'Failed to initialize calendar' });
     }
+  },
+
+  /**
+   * Reset initialization flag to force re-initialization
+   * Useful when group membership changes
+   */
+  resetInitialization: () => {
+    set({ isInitialized: false });
   },
 
   /**
@@ -173,6 +185,23 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       }
     );
     
+    // Handle notification scheduling/updating
+    // If due_date or due_time changed, update notification
+    if (updateFields.due_date !== undefined || updateFields.due_time !== undefined || updateFields.status !== undefined) {
+      const finalTask = { ...task, ...updateFields } as Task;
+      
+      // If task is completed or cancelled, cancel notification
+      if (finalTask.status === 'DONE' || finalTask.status === 'CANCEL') {
+        cancelAllNotificationsForTask(taskId).catch(console.error);
+      } else if (finalTask.due_date && finalTask.due_time) {
+        // Reschedule notification if task has due_date and due_time
+        updateTaskNotification(finalTask).catch(console.error);
+      } else {
+        // Cancel notification if due_date or due_time is removed
+        cancelAllNotificationsForTask(taskId).catch(console.error);
+      }
+    }
+    
     try {
       // API call in background
       const result = await updateTaskAPI({ id: taskId, ...updateFields });
@@ -249,6 +278,9 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       return { success: false, error: 'Task not found' };
     }
     
+    // Cancel notification for deleted task
+    cancelAllNotificationsForTask(taskId).catch(console.error);
+    
     // Optimistic delete: Remove immediately from store
     const tasksBeforeDelete = [...state.tasks];
     set({ tasks: state.tasks.filter(t => t.id !== taskId) });
@@ -283,6 +315,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     // Generate temporary ID for optimistic task
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
+    // Get current user ID for creator_id
+    const { data: { user } } = await supabase.auth.getUser();
+    const creatorId = user?.id || '';
+    
     // Create optimistic task object
     const optimisticTask: Task = {
       id: tempId,
@@ -294,11 +330,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       updated_at: new Date().toISOString(),
       completed_at: null,
       deleted_at: null,
-      user_id: '', // Will be set by server
+      user_id: creatorId, // Backward compatibility
+      creator_id: creatorId,
+      batch_id: `batch-${Date.now()}`, // Temporary batch ID
       group_id: 'group_id' in input && input.group_id ? input.group_id : null,
       original_due_date: input.due_date || null,
       assignees: [], // Will be populated by server response
-    } as Task;
+    };
     
     // Optimistic update: Add immediately to store
     const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
@@ -329,6 +367,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       set({ tasks: tasksWithoutOptimistic });
       get().mergeTasksIntoStore(tasksWithRolloverServer);
       
+      // Schedule notification if task has due_date and due_time
+      if (result.data.due_date && result.data.due_time) {
+        scheduleTaskNotification(result.data).catch(console.error);
+      }
+      
       showToast('success', '생성 완료', '작업이 생성되었습니다.');
       return { success: true, task: result.data };
     } catch (error: any) {
@@ -346,7 +389,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const state = get();
     const taskMap = new Map(state.tasks.map(t => [t.id, t]));
     
-    newTasks.forEach(newTask => {
+    // Convert Task[] to TaskWithRollover[] if needed
+    const tasksWithRollover: TaskWithRollover[] = newTasks.some(t => 'daysOverdue' in t && 'isOverdue' in t)
+      ? (newTasks as TaskWithRollover[])
+      : calculateRolloverInfo(newTasks as Task[]);
+    
+    tasksWithRollover.forEach(newTask => {
       const existingTask = taskMap.get(newTask.id);
       
       // Preserve assignees order from existing task if it exists
@@ -357,14 +405,16 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         );
         
         // Preserve original order, but update with new data
-        const preservedAssignees = existingTask.assignees.map((existingAssignee: any) => {
+        const existingAssignees = existingTask.assignees || [];
+        const preservedAssignees = existingAssignees.map((existingAssignee: any) => {
           const newAssignee = newAssigneesMap.get(existingAssignee.user_id);
           return newAssignee || existingAssignee;
         });
         
         // Add any new assignees that weren't in the original (shouldn't happen often)
-        newTask.assignees.forEach((newAssignee: any) => {
-          if (!existingTask.assignees.some((a: any) => a.user_id === newAssignee.user_id)) {
+        const newAssignees = newTask.assignees || [];
+        newAssignees.forEach((newAssignee: any) => {
+          if (!existingAssignees.some((a: any) => a.user_id === newAssignee.user_id)) {
             preservedAssignees.push(newAssignee);
           }
         });

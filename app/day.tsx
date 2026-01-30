@@ -3,18 +3,20 @@ import { AddTaskModal } from '@/components/AddTaskModal';
 import { AssigneeAvatars } from '@/components/AssigneeAvatars';
 import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { NotificationCenterModal } from '@/components/NotificationCenterModal';
+import { getWeeklyCalendarRanges, isDateInWeeklyRange } from '@/constants/calendar';
 import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
-import { isDateInWeeklyRange, getWeeklyCalendarRanges } from '@/constants/calendar';
-import { groupTasksByDate, getTasksForDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
 import { validateStateTransition } from '@/lib/api/task-state-machine';
 import { calculateTaskProgress } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
-import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { TaskStatus, TaskWithRollover } from '@/lib/types';
+import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
+import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay, subDays } from 'date-fns';
+import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Users } from 'lucide-react-native';
@@ -22,7 +24,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import { showToast } from '@/utils/toast';
 
 // TaskWithOverdue is imported from task-filtering.ts
 // Use TaskWithOverdue instead of TimelineTask
@@ -54,6 +55,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isAddTaskModalVisible, setIsAddTaskModalVisible] = useState(false);
   const [addTaskInitialDate, setAddTaskInitialDate] = useState<string | undefined>(undefined);
+  const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   const isAtTop = useSharedValue(true); // Track if ScrollView is at top (shared value for gesture handler)
   
   // Initialize calendar on mount (skip if already initialized for faster modal opening)
@@ -310,13 +312,14 @@ export default function HomeScreen() {
   }, [goToPreviousDay, goToNextDay]);
 
   const handleNotificationPress = () => {
-    showToast('info', 'Notifications', 'Notification feature coming soon!');
+    setIsNotificationModalVisible(true);
   };
 
   // Pull-to-Refresh handler
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await initializeCalendar();
+    // Force re-initialization to reload all tasks (including new group tasks)
+    await initializeCalendar(true);
     setRefreshing(false);
   }, [initializeCalendar]);
 
@@ -856,6 +859,12 @@ export default function HomeScreen() {
           setAddTaskInitialDate(undefined);
         }}
         initialDate={addTaskInitialDate}
+      />
+      
+      {/* Notification Center Modal */}
+      <NotificationCenterModal
+        visible={isNotificationModalVisible}
+        onClose={() => setIsNotificationModalVisible(false)}
       />
     </SafeAreaView>
   );

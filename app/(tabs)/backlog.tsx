@@ -2,6 +2,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AssigneeAvatars } from '@/components/AssigneeAvatars';
 import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { borderRadius, colors, shadows } from '@/constants/colors';
 import { deleteTask, updateTask } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
@@ -27,8 +28,10 @@ export default function BacklogScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const queryClient = useQueryClient();
 
+  const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
+  
   const handleNotificationPress = () => {
-    showToast('info', 'Notifications', 'Notification feature coming soon!');
+    setIsNotificationModalVisible(true);
   };
 
   // Pull-to-Refresh handler
@@ -84,6 +87,12 @@ export default function BacklogScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <AppHeader onNotificationPress={handleNotificationPress} />
+
+      {/* Notification Center Modal */}
+      <NotificationCenterModal
+        visible={isNotificationModalVisible}
+        onClose={() => setIsNotificationModalVisible(false)}
+      />
 
       {/* Section Header */}
       <View 

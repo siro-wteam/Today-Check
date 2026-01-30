@@ -139,6 +139,17 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         };
       });
 
+      // Reset calendar store initialization to force reload with new group tasks
+      // This ensures group tasks are loaded after joining
+      if (queryClientInstance) {
+        // Invalidate all task queries to force refetch
+        queryClientInstance.invalidateQueries({ queryKey: ['tasks'], exact: false });
+        
+        // Reset calendar store initialization flag
+        const { useCalendarStore } = require('./useCalendarStore');
+        useCalendarStore.getState().resetInitialization();
+      }
+
       return { success: true, group: data };
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to join group';
@@ -712,6 +723,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
     // Create channel for group_members changes
     // Note: We can't filter by multiple group_ids in Supabase Realtime filter
     // So we'll subscribe to all changes and filter in the handler
+    console.log('📡 [Realtime] Setting up group_members subscription for user:', userId);
     const channel = supabase
       .channel('public:group_members')
       .on(
@@ -729,14 +741,41 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           const currentState = get();
           const group = currentState.groups.find((g) => g.id === newMember.group_id);
           
-          // Early return if not my group (performance optimization)
+          console.log('🟢 [Realtime] Checking group:', newMember.group_id, 'Found in my groups:', !!group, 'Total groups:', currentState.groups.length);
+          
+          // If group not found in current state, it might be a new group we just joined
+          // In that case, we need to fetch the group data first
           if (!group) {
+            console.log('🟡 [Realtime] New member joined group not in my list, checking if I joined:', newMember.user_id === userId);
+            // Check if I'm the new member (I just joined)
+            if (newMember.user_id === userId) {
+              // I just joined this group - fetch it
+              console.log('🟡 [Realtime] I just joined this group, fetching:', newMember.group_id);
+              await get().fetchGroupById(newMember.group_id, userId);
+              
+              // Reset calendar store initialization to force reload with new group tasks
+              if (queryClientInstance) {
+                // Invalidate all task queries to force refetch
+                queryClientInstance.invalidateQueries({ queryKey: ['tasks'], exact: false });
+                
+                // Reset calendar store initialization flag
+                const { useCalendarStore } = require('./useCalendarStore');
+                useCalendarStore.getState().resetInitialization();
+              }
+            } else {
+              // Someone else joined a group I'm not aware of - might be a timing issue
+              // Try to check if I'm actually a member by fetching the group
+              console.log('🟡 [Realtime] Someone joined a group not in my list, checking if I should have it:', newMember.group_id);
+              // Don't fetch here to avoid infinite loops - let fetchMyGroups handle it
+            }
             return;
           }
           
           // Fetch new member's profile
           const profiles = await fetchProfiles([newMember.user_id]);
           const profile = profiles.get(newMember.user_id);
+          
+          console.log('🟢 [Realtime] Adding new member to group:', newMember.group_id, 'Member:', newMember.user_id, 'Current members count:', group.members.length);
           
           // Update group members count and add new member
           set((state) => {
@@ -745,8 +784,12 @@ export const useGroupStore = create<GroupState>((set, get) => ({
               
               // Check if member already exists (avoid duplicates)
               const memberExists = g.members.some((m) => m.id === newMember.user_id);
-              if (memberExists) return g;
+              if (memberExists) {
+                console.log('🟡 [Realtime] Member already exists, skipping:', newMember.user_id);
+                return g;
+              }
               
+              console.log('✅ [Realtime] Adding new member to group state');
               return {
                 ...g,
                 members: [
@@ -762,9 +805,14 @@ export const useGroupStore = create<GroupState>((set, get) => ({
               };
             };
             
+            const updatedGroups = state.groups.map(updateGroup);
+            const updatedCurrentGroup = state.currentGroup ? updateGroup(state.currentGroup) : null;
+            
+            console.log('✅ [Realtime] Updated groups state, new members count:', updatedCurrentGroup?.members.length || 'N/A');
+            
             return {
-              groups: state.groups.map(updateGroup),
-              currentGroup: state.currentGroup ? updateGroup(state.currentGroup) : null,
+              groups: updatedGroups,
+              currentGroup: updatedCurrentGroup,
             };
           });
         }
@@ -785,6 +833,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           // Check if I was the one who left
           if (oldMember.user_id === userId) {
             // I was kicked or left - remove group from my groups list
+            console.log('🔴 [Realtime] I was removed from group:', oldMember.group_id);
             set((state) => {
               return {
                 groups: state.groups.filter((g) => g.id !== oldMember.group_id),
@@ -835,21 +884,28 @@ export const useGroupStore = create<GroupState>((set, get) => ({
             }
           } else {
             // Someone else left - remove from current group members
-            set((state) => {
-              const updateGroup = (g: Group) => {
-                if (g.id !== oldMember.group_id) return g;
+            console.log('🔴 [Realtime] Someone else left group:', oldMember.group_id, 'user:', oldMember.user_id);
+            const currentState = get();
+            const group = currentState.groups.find((g) => g.id === oldMember.group_id);
+            
+            // Only update if this is a group I'm a member of
+            if (group) {
+              set((state) => {
+                const updateGroup = (g: Group) => {
+                  if (g.id !== oldMember.group_id) return g;
+                  
+                  return {
+                    ...g,
+                    members: g.members.filter((m) => m.id !== oldMember.user_id),
+                  };
+                };
                 
                 return {
-                  ...g,
-                  members: g.members.filter((m) => m.id !== oldMember.user_id),
+                  groups: state.groups.map(updateGroup),
+                  currentGroup: state.currentGroup ? updateGroup(state.currentGroup) : null,
                 };
-              };
-              
-              return {
-                groups: state.groups.map(updateGroup),
-                currentGroup: state.currentGroup ? updateGroup(state.currentGroup) : null,
-              };
-            });
+              });
+            }
             
             // Update React Query cache: Remove assignee from tasks in this group
             // DB trigger already removed incomplete task assignments, but we need to update UI
@@ -931,13 +987,17 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         }
       )
       .subscribe((status) => {
-        // Only log important status changes (reduce noise)
+        // Log all status changes for debugging
+        console.log('📡 [Realtime] group_members subscription status:', status);
         if (status === 'SUBSCRIBED') {
           console.log('✅ [Realtime] Successfully subscribed to group_members');
         } else if (status === 'CHANNEL_ERROR') {
           console.error('🔴 [Realtime] Channel error occurred');
+        } else if (status === 'TIMED_OUT') {
+          console.error('🔴 [Realtime] Subscription timed out');
+        } else if (status === 'CLOSED') {
+          console.log('🔴 [Realtime] Subscription closed');
         }
-        // Don't log CLOSED status to reduce log noise
       });
 
     set({ membersSubscriptionChannel: channel, onKickedFromGroup: onKickedFromGroup || null });

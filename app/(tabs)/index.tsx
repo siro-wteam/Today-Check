@@ -2,24 +2,24 @@ import { AddTaskModal } from '@/components/AddTaskModal';
 import { AppHeader } from '@/components/AppHeader';
 import { AssigneeAvatars } from '@/components/AssigneeAvatars';
 import { EmptyState } from '@/components/EmptyState';
-import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
-import { isDateInWeeklyRange, getWeeklyCalendarRanges } from '@/constants/calendar';
-import { groupTasksByDate, getTasksForDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
+import { NotificationCenterModal } from '@/components/NotificationCenterModal';
+import { getWeeklyCalendarRanges, isDateInWeeklyRange } from '@/constants/calendar';
+import { borderRadius, colors, shadows } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
-import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
-import type { Task } from '@/lib/types';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { TaskStatus } from '@/lib/types';
+import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
+import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek, subWeeks } from 'date-fns';
+import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { Check, ChevronLeft, ChevronRight, Clock, Home, Package, Plus, Users } from 'lucide-react-native';
+import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
+import { Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { showToast } from '@/utils/toast';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -70,6 +70,7 @@ export default function WeekScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isAddTaskModalVisible, setIsAddTaskModalVisible] = useState(false);
   const [addTaskInitialDate, setAddTaskInitialDate] = useState<string | undefined>(undefined);
+  const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   
   // Calculate this week's weekStartStr (constant)
   const THIS_WEEK_START_STR = useMemo(() => {
@@ -284,7 +285,8 @@ export default function WeekScreen() {
   // Pull-to-refresh
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await initializeCalendar();
+    // Force re-initialization to reload all tasks (including new group tasks)
+    await initializeCalendar(true);
     setRefreshing(false);
   }, [initializeCalendar]);
   
@@ -362,7 +364,13 @@ export default function WeekScreen() {
   
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader />
+      <AppHeader onNotificationPress={() => setIsNotificationModalVisible(true)} />
+      
+      {/* Notification Center Modal */}
+      <NotificationCenterModal
+        visible={isNotificationModalVisible}
+        onClose={() => setIsNotificationModalVisible(false)}
+      />
       
       {/* Week Progress Card */}
       <View 
