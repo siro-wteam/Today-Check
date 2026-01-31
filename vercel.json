@@ -8,15 +8,5 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "build": {
-    "env": {
-      "EXPO_PUBLIC_SUPABASE_URL": "@supabase_url",
-      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key"
-    }
-  },
-  "env": {
-    "EXPO_PUBLIC_SUPABASE_URL": "@supabase_url",
-    "EXPO_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key"
-  }
+  ]
 }
