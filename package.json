@@ -4,13 +4,27 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "start:dev": "cp .env.development .env.local && expo start",
+    "start:prod": "cp .env.production .env.local && expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
+    "android:dev": "cp .env.development .env.local && expo run:android",
+    "android:prod": "cp .env.production .env.local && expo run:android",
     "ios": "expo run:ios",
+    "ios:dev": "cp .env.development .env.local && expo run:ios",
+    "ios:prod": "cp .env.production .env.local && expo run:ios",
     "ios:device": "./scripts/run-ios-device.sh",
+    "ios:device:dev": "./scripts/run-ios-device.sh dev",
+    "ios:device:prod": "./scripts/run-ios-device.sh prod",
     "web": "expo start --web",
+    "web:dev": "cp .env.development .env.local && expo start --web",
+    "web:prod": "cp .env.production .env.local && expo start --web",
     "lint": "expo lint",
-    "build": "npx expo export -p web"
+    "build": "npx expo export -p web",
+    "build:dev": "cp .env.development .env.local && npx expo export -p web",
+    "build:prod": "cp .env.production .env.local && npx expo export -p web",
+    "build:vercel": "npx expo export -p web",
+    "vercel-build": "npx expo export -p web"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
