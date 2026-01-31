@@ -35,6 +35,9 @@ yarn-error.*
 .env.development
 .env.production
 
+# 배포 테스트용 주석
+# Environment variables for deployment testing
+
 # typescript
 *.tsbuildinfo
 
