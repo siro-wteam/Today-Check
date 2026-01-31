@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { useNotificationRealtime } from '@/lib/hooks/use-notification-realtime';
 import { useQuery } from '@tanstack/react-query';
 import { Bell } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { NotificationCenterModal } from './NotificationCenterModal';
 
@@ -26,7 +26,16 @@ export function AppHeader({ onNotificationPress }: AppHeaderProps) {
     queryFn: getUnreadNotificationCount,
     enabled: !!user?.id, // Only fetch when user is logged in
     refetchInterval: 30000, // Refetch every 30 seconds (backup)
+    retry: 3, // Retry failed requests 3 times
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
   });
+
+  // Handle errors with useEffect
+  useEffect(() => {
+    if (unreadCountResponse?.error) {
+      console.warn('Notification count fetch failed:', unreadCountResponse.error);
+    }
+  }, [unreadCountResponse?.error]);
 
   const unreadCount = unreadCountResponse?.data || 0;
 

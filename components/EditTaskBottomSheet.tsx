@@ -1,30 +1,23 @@
 import { colors } from '@/constants/colors';
-import { deleteTask, moveTaskToBacklog, updateTaskAssignees, getTaskById } from '@/lib/api/tasks';
+import { deleteTask, getTaskById, moveTaskToBacklog, updateTask, updateTaskAssignees } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
-import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
-import { useQueryClient } from '@tanstack/react-query';
+import { useGroupStore } from '@/lib/stores/useGroupStore';
+import type { Task } from '@/lib/types';
+import { showToast } from '@/utils/toast';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { addDays, format, isToday, isTomorrow, parse, parseISO } from 'date-fns';
+import { useQueryClient } from '@tanstack/react-query';
+import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
+import * as Haptics from 'expo-haptics';
 import { Package, Trash2, Users } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { showToast } from '@/utils/toast';
 import { ModalCloseButton } from './ModalCloseButton';
-import * as Haptics from 'expo-haptics';
 
 interface EditTaskBottomSheetProps {
   visible: boolean;
   onClose: () => void;
-  task: {
-    id: string;
-    title: string;
-    due_date: string | null;
-    due_time: string | null;
-    group_id?: string | null;
-    assignees?: Array<{ user_id: string; profile?: { nickname: string } }>;
-    status?: string; // Task status: 'TODO', 'DONE', 'CANCEL'
-  };
+  task: Task;
   onUpdate: () => void;
   onDateChange?: (dateStr: string) => void;
 }
@@ -36,7 +29,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   const queryClient = useQueryClient();
   
   // Form state
-  const [title, setTitle] = useState(task.title);
+  const [title, setTitle] = useState(task.title || '');
   const [dueDate, setDueDate] = useState<Date | null>(task.due_date ? parseISO(task.due_date) : null);
   const [dueTime, setDueTime] = useState<Date | null>(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -196,10 +189,81 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       return;
     }
 
+    // Show confirmation dialog (platform-specific)
+    const confirmMove = () => {
+      if (Platform.OS === 'web') {
+        // Web: Use browser confirm dialog
+        return window.confirm('Are you sure you want to move this task to the backlog?');
+      } else {
+        // Native: Use Alert.alert
+        return new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Move to Backlog',
+            'Are you sure you want to move this task to the backlog?',
+            [
+              {
+                text: 'Cancel',
+                style: 'cancel',
+                onPress: () => resolve(false),
+              },
+              {
+                text: 'Move',
+                style: 'destructive',
+                onPress: () => resolve(true),
+              },
+            ]
+          );
+        });
+      }
+    };
+
+    const confirmed = await confirmMove();
+    if (!confirmed) return;
+
     try {
+      // Create optimistic task with due_date cleared
+      const optimisticTask: Task = {
+        ...task,
+        due_date: null,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Apply optimistic update to CalendarStore
+      const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+      const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
+      mergeTasksIntoStore(tasksWithRollover);
+
+      // Apply optimistic update to React Query cache
+      queryClient.setQueriesData(
+        { queryKey: ['tasks', 'unified'], exact: false },
+        (oldData: any) => {
+          if (!oldData) return oldData;
+          if (Array.isArray(oldData)) {
+            return oldData.map((t: any) => t.id === task.id ? optimisticTask : t);
+          }
+          return oldData;
+        }
+      );
+
+      // Call API
       const { error } = await moveTaskToBacklog(task.id);
       
       if (error) {
+        // Revert optimistic update on error
+        const revertTasks = calculateRolloverInfo([task]);
+        mergeTasksIntoStore(revertTasks);
+        
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          (oldData: any) => {
+            if (!oldData) return oldData;
+            if (Array.isArray(oldData)) {
+              return oldData.map((t: any) => t.id === task.id ? task : t);
+            }
+            return oldData;
+          }
+        );
+        
         throw error;
       }
 
@@ -233,16 +297,60 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
       const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
 
-      // Update task basic info with optimistic update
-      const updateResult = await updateTaskInStore(task.id, {
+      // Create optimistic task for immediate UI update
+      const optimisticTask: Task = {
+        ...task,
+        title: title.trim(),
+        due_date: dueDateStr,
+        due_time: dueTimeStr,
+        group_id: selectedGroupId,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Apply optimistic update to CalendarStore
+      const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+      const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
+      mergeTasksIntoStore(tasksWithRollover);
+
+      // Apply optimistic update to React Query cache
+      queryClient.setQueriesData(
+        { queryKey: ['tasks', 'unified'], exact: false },
+        (oldData: any) => {
+          if (!oldData) return oldData;
+          if (Array.isArray(oldData)) {
+            return oldData.map((t: any) => t.id === task.id ? optimisticTask : t);
+          }
+          return oldData;
+        }
+      );
+
+      // Update task basic info - use API directly for backlog tasks
+      const updateResult = await updateTask({
+        id: task.id,
         title: title.trim(),
         due_date: dueDateStr,
         due_time: dueTimeStr,
         group_id: selectedGroupId,
       });
 
-      if (!updateResult.success) {
-        throw new Error(updateResult.error || 'Failed to update task');
+      if (updateResult.error) {
+        // Revert optimistic update on error
+        const { calculateRolloverInfo: revertCalc } = await import('@/lib/api/tasks');
+        const revertTasks = revertCalc([task as Task]);
+        mergeTasksIntoStore(revertTasks);
+        
+        queryClient.setQueriesData(
+          { queryKey: ['tasks', 'unified'], exact: false },
+          (oldData: any) => {
+            if (!oldData) return oldData;
+            if (Array.isArray(oldData)) {
+              return oldData.map((t: any) => t.id === task.id ? task : t);
+            }
+            return oldData;
+          }
+        );
+        
+        throw new Error(updateResult.error.message || 'Failed to update task');
       }
 
       // Update assignees if group task
@@ -448,7 +556,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                       className="p-2"
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                      <Trash2 size={20} color={colors.destructive || '#ef4444'} strokeWidth={2} />
+                      <Trash2 size={20} color={colors.error} strokeWidth={2} />
                     </Pressable>
                   )}
                   {/* Close Button */}

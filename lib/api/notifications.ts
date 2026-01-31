@@ -45,13 +45,24 @@ export async function getUnreadNotificationCount(): Promise<{ data: number | nul
       .eq('is_read', false);
 
     if (error) {
-      console.error('Error fetching unread notification count:', error);
+      // Log with more context for debugging
+      console.error('Error fetching unread notification count:', {
+        error,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
       return { data: null, error: new Error(error.message) };
     }
 
     return { data: count || 0, error: null };
   } catch (err: any) {
-    console.error('Exception fetching unread notification count:', err);
+    console.error('Exception fetching unread notification count:', {
+      error: err,
+      message: err.message,
+      stack: err.stack
+    });
     return { data: null, error: err };
   }
 }

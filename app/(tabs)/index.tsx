@@ -1,6 +1,7 @@
 import { AddTaskModal } from '@/components/AddTaskModal';
 import { AppHeader } from '@/components/AppHeader';
 import { AssigneeAvatars } from '@/components/AssigneeAvatars';
+import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { getWeeklyCalendarRanges, isDateInWeeklyRange } from '@/constants/calendar';
@@ -57,6 +58,7 @@ export default function WeekScreen() {
     toggleTaskComplete: toggleTaskCompleteInStore,
     deleteTask: deleteTaskInStore,
   } = useCalendarStore();
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   
   // Initialize calendar on mount
@@ -71,6 +73,10 @@ export default function WeekScreen() {
   const [isAddTaskModalVisible, setIsAddTaskModalVisible] = useState(false);
   const [addTaskInitialDate, setAddTaskInitialDate] = useState<string | undefined>(undefined);
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
+  
+  // Edit task modal state
+  const [isEditTaskModalVisible, setIsEditTaskModalVisible] = useState(false);
+  const [editingTask, setEditingTask] = useState<any>(null);
   
   // Calculate this week's weekStartStr (constant)
   const THIS_WEEK_START_STR = useMemo(() => {
@@ -198,17 +204,43 @@ export default function WeekScreen() {
   // Scroll to today within a week
   const scrollToTodayInWeek = useCallback((weekStartStr: string) => {
     const scrollViewRef = scrollViewRefs.current.get(weekStartStr);
-    if (!scrollViewRef) return;
+    if (!scrollViewRef) {
+      console.log('ScrollView ref not found for week:', weekStartStr);
+      return;
+    }
     
     const today = format(startOfDay(new Date()), 'yyyy-MM-dd');
     const cardKey = `${weekStartStr}-${today}`;
     const cardY = cardPositions.current.get(cardKey);
     
+    console.log('Scroll to today details:', {
+      weekStartStr,
+      today,
+      cardKey,
+      cardY,
+      hasCardPosition: cardY !== undefined
+    });
+    
     if (cardY !== undefined) {
       scrollViewRef.scrollTo({
-        y: Math.max(0, cardY - 10),
+        y: Math.max(0, cardY - 20), // Increased offset
         animated: true,
       });
+    } else {
+      // Fallback: try to scroll after a short delay
+      setTimeout(() => {
+        const retryCardY = cardPositions.current.get(cardKey);
+        if (retryCardY !== undefined) {
+          const retryScrollViewRef = scrollViewRefs.current.get(weekStartStr);
+          if (retryScrollViewRef) {
+            console.log('Retry scroll to today with position:', retryCardY);
+            retryScrollViewRef.scrollTo({
+              y: Math.max(0, retryCardY - 20),
+              animated: true,
+            });
+          }
+        }
+      }, 300);
     }
   }, []);
   
@@ -254,6 +286,29 @@ export default function WeekScreen() {
       });
     }
   }, [currentWeekStartStr, weekPagesMap]);
+
+  // Handle task edit
+  const handleTaskEdit = useCallback((task: any) => {
+    if (Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+    setEditingTask(task);
+    setIsEditTaskModalVisible(true);
+  }, []);
+
+  // Make handleTaskEdit globally available for WeekPageComponent
+  useEffect(() => {
+    (globalThis as any).handleTaskEdit = handleTaskEdit;
+    return () => {
+      delete (globalThis as any).handleTaskEdit;
+    };
+  }, [handleTaskEdit]);
+
+  // Handle task update
+  const handleTaskUpdate = useCallback(() => {
+    // Refresh data after update
+    queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+  }, [queryClient]);
 
   // Go to this week (today)
   const goToThisWeek = useCallback(() => {
@@ -325,11 +380,18 @@ export default function WeekScreen() {
         updateTaskInStore={updateTaskInStore}
         toggleTaskCompleteInStore={toggleTaskCompleteInStore}
         deleteTaskInStore={deleteTaskInStore}
+        onTaskEdit={handleTaskEditForWeek}
         thisWeekStartStr={THIS_WEEK_START_STR}
         currentWeekStartStr={currentWeekStartStr}
       />
     );
   };
+
+  // Local task edit handler for WeekPageComponent
+  const handleTaskEditForWeek = useCallback((task: any) => {
+    console.log('handleTaskEditForWeek called:', task);
+    handleTaskEdit(task);
+  }, [handleTaskEdit]);
   
   // Calculate progress
   const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
@@ -531,6 +593,14 @@ export default function WeekScreen() {
         }}
         initialDate={addTaskInitialDate}
       />
+      
+      {/* Edit Task Modal */}
+      <EditTaskBottomSheet
+        visible={isEditTaskModalVisible}
+        onClose={() => setIsEditTaskModalVisible(false)}
+        task={editingTask || {}}
+        onUpdate={handleTaskUpdate}
+      />
     </SafeAreaView>
   );
 }
@@ -550,6 +620,7 @@ const WeekPageComponent = React.memo(function WeekPageComponent({
   updateTaskInStore,
   toggleTaskCompleteInStore,
   deleteTaskInStore,
+  onTaskEdit,
   thisWeekStartStr,
   currentWeekStartStr,
 }: {
@@ -566,9 +637,19 @@ const WeekPageComponent = React.memo(function WeekPageComponent({
   updateTaskInStore: (taskId: string, updateFields: any) => Promise<{ success: boolean; error?: string }>;
   toggleTaskCompleteInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
   deleteTaskInStore: (taskId: string) => Promise<{ success: boolean; error?: string }>;
+  onTaskEdit: (task: any) => void;
   thisWeekStartStr: string;
   currentWeekStartStr: string;
 }) {
+  // Local handler for task edit
+  const handleTaskEditLocal = useCallback((task: any) => {
+    console.log('handleTaskEditLocal called:', task);
+    if (onTaskEdit) {
+      onTaskEdit(task);
+    }
+  }, [onTaskEdit]);
+
+  console.log('WeekPageComponent props:', { onTaskEdit: typeof onTaskEdit });
   const scrollViewRef = useRef<ScrollView>(null);
   const hasAutoScrolled = useRef(false);
   
@@ -588,11 +669,23 @@ const WeekPageComponent = React.memo(function WeekPageComponent({
     const isThisWeek = item.weekStartStr === thisWeekStartStr;
     const isCurrentlyVisible = item.weekStartStr === currentWeekStartStr;
     
+    // Add debug logging
+    console.log('Auto-scroll check:', {
+      isThisWeek,
+      isCurrentlyVisible,
+      hasAutoScrolled: hasAutoScrolled.current,
+      hasScrollViewRef: !!scrollViewRef.current,
+      weekStartStr: item.weekStartStr,
+      thisWeekStartStr,
+      currentWeekStartStr
+    });
+    
     if (isThisWeek && isCurrentlyVisible && !hasAutoScrolled.current && scrollViewRef.current) {
       const timeoutId = setTimeout(() => {
+        console.log('Attempting to scroll to today...');
         scrollToTodayInWeek(item.weekStartStr);
         hasAutoScrolled.current = true;
-      }, 400);
+      }, 800); // Increased delay for better reliability
       return () => clearTimeout(timeoutId);
     }
   }, [item.weekStartStr, thisWeekStartStr, currentWeekStartStr, scrollToTodayInWeek]);
@@ -1070,18 +1163,34 @@ const DailyCard = React.memo(function DailyCard({
                       </Pressable>
                       
                       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                        <Text 
-                          numberOfLines={2}
-                          ellipsizeMode="tail"
-                          style={[
-                            { fontSize: 14, fontWeight: '500', flexShrink: 1, minWidth: 0 },
-                            isDone && { color: colors.textSub, textDecorationLine: 'line-through' },
-                            isCancelled && { color: colors.textDisabled, textDecorationLine: 'line-through' },
-                            !isDone && !isCancelled && { color: colors.textMain, fontWeight: '500' },
-                          ]}
+                        <Pressable
+                          onPress={() => {
+                            console.log('Task title pressed in week view:', task);
+                            // Use global handleTaskEdit function
+                            const globalHandler = (globalThis as any).handleTaskEdit;
+                            if (typeof globalHandler === 'function') {
+                              globalHandler(task);
+                            } else {
+                              console.error('Global handleTaskEdit not found');
+                            }
+                          }}
+                          style={{ flexShrink: 1, minWidth: 0 }}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
                         >
-                          {String(task.title || '(Untitled)')}
-                        </Text>
+                          <Text 
+                            numberOfLines={2}
+                            ellipsizeMode="tail"
+                            style={[
+                              { fontSize: 14, fontWeight: '500', flexShrink: 1, minWidth: 0 },
+                              isDone && { color: colors.textSub, textDecorationLine: 'line-through' },
+                              isCancelled && { color: colors.textDisabled, textDecorationLine: 'line-through' },
+                              !isDone && !isCancelled && { color: colors.textMain, fontWeight: '500' },
+                            ]}
+                          >
+                            {String(task.title || '(Untitled)')}
+                          </Text>
+                        </Pressable>
                         
                         {task.due_time && (
                           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6, flexShrink: 0 }}>

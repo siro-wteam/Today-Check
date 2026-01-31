@@ -62,8 +62,8 @@ BEGIN
         v_creator_id,
         v_group_id,
         'TASK_ASSIGNED',
-        '할 일 배정',
-        '🧑‍💻 ' || v_actor_nickname || '님이 ' || v_task_title || '을(를) 할당했습니다.',
+          'Task Assigned',
+          '🧑‍💻 ' || v_actor_nickname || ' has assigned ' || v_task_title || ' to you.',
         NEW.task_id
       );
     END IF;
@@ -159,8 +159,8 @@ BEGIN
           v_completer_id,
           v_group_id,
           'TASK_COMPLETED',
-          '할 일 완료',
-          '✅ ' || v_actor_nickname || '님이 ' || v_task_title || '을(를) 완료했습니다!',
+          'Task Completed',
+          '✅ ' || v_actor_nickname || ' has completed ' || v_task_title || '!',
           NEW.id
         );
       END LOOP;
@@ -180,8 +180,8 @@ BEGIN
           v_completer_id,
           NULL,
           'TASK_COMPLETED',
-          '할 일 완료',
-          '✅ ' || v_actor_nickname || '님이 ' || v_task_title || '을(를) 완료했습니다!',
+          'Task Completed',
+          '✅ ' || v_actor_nickname || ' has completed ' || v_task_title || '!',
           NEW.id
         );
       END IF;
@@ -238,8 +238,8 @@ BEGIN
           NEW.user_id,
           NEW.group_id,
           'GROUP_JOINED',
-          '새 멤버 입장',
-          '👋 ' || v_new_member_nickname || '님이 그룹에 참여했습니다. 환영해주세요!',
+          'New Member Joined',
+          '👋 ' || v_new_member_nickname || ' has joined the group. Welcome them!',
           NEW.group_id
         );
       END LOOP;
@@ -287,8 +287,8 @@ BEGIN
       NULL, -- Actor is not tracked for kicks (could be owner/admin)
       OLD.group_id,
       'GROUP_KICKED',
-      '멤버 강퇴',
-      '⚠️ 관리자에 의해 그룹에서 제외되었습니다.',
+      'Member Removed',
+      '⚠️ You have been removed from the group by an admin.',
       OLD.group_id
     );
   END IF;
@@ -338,8 +338,8 @@ BEGIN
       NULL, -- Actor is not tracked (could be owner)
       NEW.group_id,
       'GROUP_ROLE_CHANGED',
-      '권한 변경',
-      '👑 ' || v_role_text || '로 승격되었습니다.',
+      'Role Changed',
+      '👑 You have been promoted to ' || v_role_text || '.',
       NEW.group_id
     );
   END IF;

@@ -1,19 +1,53 @@
+import { AboutModal } from '@/components/AboutModal';
 import { AppHeader } from '@/components/AppHeader';
 import { EditNicknameModal } from '@/components/EditNicknameModal';
 import { NotificationCenterModal } from '@/components/NotificationCenterModal';
+import { NotificationSettingsModal } from '@/components/NotificationSettingsModal';
+import { borderRadius, colors, spacing } from '@/constants/colors';
+import { getProfileStats, type ProfileStats } from '@/lib/api/profile-stats';
 import { signOut, useAuth } from '@/lib/hooks/use-auth';
 import { Edit2, LogOut, Mail, User as UserIcon } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
-import { colors, borderRadius, spacing } from '@/constants/colors';
 
 export default function ProfileScreen() {
   const { user, profile, updateProfile } = useAuth();
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
+  const [isNotificationSettingsVisible, setIsNotificationSettingsVisible] = useState(false);
+  const [isAboutModalVisible, setIsAboutModalVisible] = useState(false);
+  const [profileStats, setProfileStats] = useState<ProfileStats | null>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
+
+  // Load profile stats on component mount
+  useEffect(() => {
+    loadProfileStats();
+  }, []);
+
+  const loadProfileStats = async () => {
+    try {
+      setIsLoadingStats(true);
+      const { data, error } = await getProfileStats();
+      if (data && !error) {
+        setProfileStats(data);
+      }
+    } catch (error) {
+      console.error('Error loading profile stats:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
 
   const handleNotificationPress = () => {
     setIsNotificationModalVisible(true);
+  };
+
+  const handleNotificationSettingsPress = () => {
+    setIsNotificationSettingsVisible(true);
+  };
+
+  const handleAboutPress = () => {
+    setIsAboutModalVisible(true);
   };
 
   const handleSignOut = async () => {
@@ -99,7 +133,7 @@ export default function ProfileScreen() {
           }}>
             <View style={{ alignItems: 'center' }}>
               <Text style={{ fontSize: 24, fontWeight: '700', color: colors.textMain, marginBottom: spacing.xs }}>
-                —
+                {isLoadingStats ? '...' : (profileStats?.completed ?? 0)}
               </Text>
               <Text style={{ fontSize: 12, color: colors.textSub }}>
                 Completed
@@ -108,7 +142,7 @@ export default function ProfileScreen() {
             <View style={{ width: 1, backgroundColor: colors.border }} />
             <View style={{ alignItems: 'center' }}>
               <Text style={{ fontSize: 24, fontWeight: '700', color: colors.textMain, marginBottom: spacing.xs }}>
-                —
+                {isLoadingStats ? '...' : (profileStats?.active ?? 0)}
               </Text>
               <Text style={{ fontSize: 12, color: colors.textSub }}>
                 Active
@@ -117,7 +151,7 @@ export default function ProfileScreen() {
             <View style={{ width: 1, backgroundColor: colors.border }} />
             <View style={{ alignItems: 'center' }}>
               <Text style={{ fontSize: 24, fontWeight: '700', color: colors.textMain, marginBottom: spacing.xs }}>
-                —
+                {isLoadingStats ? '...' : (profileStats?.streak ?? 0)}
               </Text>
               <Text style={{ fontSize: 12, color: colors.textSub }}>
                 Streak
@@ -146,92 +180,89 @@ export default function ProfileScreen() {
             SETTINGS
           </Text>
           
-          <Pressable style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: spacing.lg,
-            paddingVertical: spacing.lg,
-            backgroundColor: pressed ? colors.gray50 : 'transparent',
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-          })}>
+          {/* 첫 번째 구분선 - Settings와 Notifications 사이 */}
+          <View style={{
+            height: 1,
+            backgroundColor: colors.border,
+            marginHorizontal: spacing.lg,
+          }} />
+
+          <Pressable 
+            style={({ pressed }) => ({
+              paddingHorizontal: spacing.lg,
+              backgroundColor: pressed ? colors.gray50 : 'transparent',
+              borderTopWidth: 0,  // 모든 border 제거
+              borderBottomWidth: 0,
+            })}
+            onPress={handleNotificationSettingsPress}
+          >
             <View style={{
-              width: 40,
-              height: 40,
-              borderRadius: borderRadius.full,
-              backgroundColor: colors.gray100,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: spacing.md,
+              paddingVertical: Platform.OS === 'web' ? spacing.xl : 20,  // 앱에서는 적당한 값 (20px)
             }}>
-              <Text style={{ fontSize: 18 }}>🔔</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '500', color: colors.textMain }}>
+              <View style={{
+                width: 40,
+                height: 40,
+                borderRadius: borderRadius.full,
+                backgroundColor: colors.gray100,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginLeft: spacing.lg,
+                marginRight: 8,
+              }}>
+                <Text style={{ fontSize: 18 }}>🔔</Text>
+              </View>
+              <Text style={{ 
+                fontSize: 16, 
+                fontWeight: '500', 
+                color: colors.textMain,
+              }}>
                 Notifications
               </Text>
-              <Text style={{ fontSize: 14, color: colors.textSub }}>
-                Manage your notifications
-              </Text>
             </View>
           </Pressable>
 
-          <Pressable style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: spacing.lg,
-            paddingVertical: spacing.lg,
-            backgroundColor: pressed ? colors.gray50 : 'transparent',
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-          })}>
-            <View style={{
-              width: 40,
-              height: 40,
-              borderRadius: borderRadius.full,
-              backgroundColor: colors.gray100,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: spacing.md,
-            }}>
-              <Text style={{ fontSize: 18 }}>🎨</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '500', color: colors.textMain }}>
-                Appearance
-              </Text>
-              <Text style={{ fontSize: 14, color: colors.textSub }}>
-                Theme and display settings
-              </Text>
-            </View>
-          </Pressable>
+          {/* 구분선 - 양쪽 플랫폼 모두 보이도록 */}
+          <View style={{
+            height: 1,
+            backgroundColor: colors.border,
+            marginHorizontal: spacing.lg,
+          }} />
 
-          <Pressable style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: spacing.lg,
-            paddingVertical: spacing.lg,
-            backgroundColor: pressed ? colors.gray50 : 'transparent',
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-          })}>
+          <Pressable 
+            style={({ pressed }) => ({
+              paddingHorizontal: spacing.lg,
+              paddingVertical: Platform.OS === 'web' ? spacing.xl : 20,  // 앱에서는 적당한 값 (20px)
+              backgroundColor: pressed ? colors.gray50 : 'transparent',
+              borderTopWidth: 0,  // 위쪽 라인 제거 (별도 View로 처리)
+              borderBottomWidth: 0,  // 아래쪽 라인 제거
+            })}
+            onPress={handleAboutPress}
+          >
             <View style={{
-              width: 40,
-              height: 40,
-              borderRadius: borderRadius.full,
-              backgroundColor: colors.gray100,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              marginRight: spacing.md,
+              paddingVertical: Platform.OS === 'web' ? spacing.xl : 20,  // 앱에서는 적당한 값 (20px)
             }}>
-              <Text style={{ fontSize: 18 }}>ℹ️</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '500', color: colors.textMain }}>
+              <View style={{
+                width: 40,
+                height: 40,
+                borderRadius: borderRadius.full,
+                backgroundColor: colors.gray100,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginLeft: spacing.lg,
+                marginRight: 8,
+              }}>
+                <Text style={{ fontSize: 18 }}>ℹ️</Text>
+              </View>
+              <Text style={{ 
+                fontSize: 16, 
+                fontWeight: '500', 
+                color: colors.textMain,
+              }}>
                 About
-              </Text>
-              <Text style={{ fontSize: 14, color: colors.textSub }}>
-                Version and info
               </Text>
             </View>
           </Pressable>
@@ -280,6 +311,18 @@ export default function ProfileScreen() {
       <NotificationCenterModal
         visible={isNotificationModalVisible}
         onClose={() => setIsNotificationModalVisible(false)}
+      />
+      
+      {/* Notification Settings Modal */}
+      <NotificationSettingsModal
+        visible={isNotificationSettingsVisible}
+        onClose={() => setIsNotificationSettingsVisible(false)}
+      />
+      
+      {/* About Modal */}
+      <AboutModal
+        visible={isAboutModalVisible}
+        onClose={() => setIsAboutModalVisible(false)}
       />
     </SafeAreaView>
   );

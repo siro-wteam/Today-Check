@@ -14,6 +14,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -45,6 +47,30 @@ export async function requestNotificationPermissions(): Promise<boolean> {
  */
 export async function scheduleTaskNotification(task: Task): Promise<string | null> {
   try {
+    // Import notification settings dynamically to avoid circular dependencies
+    // For now, we'll use a simple check - in a real app, you might want to 
+    // create a separate API function to get settings
+    let notificationsEnabled = true;
+    
+    try {
+      // Simple platform-specific settings check
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const settings = localStorage.getItem('notification-settings');
+        if (settings) {
+          const parsed = JSON.parse(settings);
+          notificationsEnabled = parsed.notificationsEnabled ?? true;
+        }
+      }
+    } catch (error) {
+      console.log('Could not check notification settings, using default');
+    }
+    
+    // Check if notifications are enabled
+    if (!notificationsEnabled) {
+      console.log('[scheduleTaskNotification] Notifications are disabled');
+      return null;
+    }
+    
     // Local scheduled notifications are only supported on native platforms.
     // On web, expo-notifications does not support scheduled triggers.
     if (Platform.OS === 'web') {

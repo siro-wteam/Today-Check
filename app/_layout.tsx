@@ -17,9 +17,10 @@ import 'react-native-reanimated';
 
 // Local imports
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { NotificationSettingsProvider } from '@/lib/contexts/NotificationSettingsContext';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { queryClient } from '@/lib/query-client';
-import { useGroupStore, setQueryClientForGroupStore } from '@/lib/stores/useGroupStore';
+import { setQueryClientForGroupStore, useGroupStore } from '@/lib/stores/useGroupStore';
 import '../global.css';
 
 // Keep the splash screen visible while we fetch resources
@@ -191,7 +192,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.gestureContainer}>
       <>
         <QueryClientProvider client={queryClient}>
-          <RootLayoutNav />
+          <NotificationSettingsProvider>
+            <RootLayoutNav />
+          </NotificationSettingsProvider>
         </QueryClientProvider>
         {Platform.OS === 'web' && <Toaster position="bottom-center" />}
       </>
