@@ -9,18 +9,17 @@
  * - Shared selectedDate between Weekly and Daily views
  */
 
-import { create } from 'zustand';
 import { format, startOfDay } from 'date-fns';
-import { getWeeklyCalendarRanges } from '../../constants/calendar';
-import { getAllTasksInRange } from '../api/tasks';
-import { createTask, createTaskWithAssignees, updateTask as updateTaskAPI, deleteTask as deleteTaskAPI } from '../api/tasks';
-import type { Task, TaskWithRollover, CreateTaskInput, CreateTaskWithAssigneesInput, UpdateTaskInput } from '../types';
-import { calculateRolloverInfo } from '../api/tasks';
-import { showToast } from '../../utils/toast';
 import * as Haptics from 'expo-haptics';
+import { Platform } from 'react-native';
+import { create } from 'zustand';
+import { getWeeklyCalendarRanges } from '../../constants/calendar';
+import { showToast } from '../../utils/toast';
+import { calculateRolloverInfo, createTask, createTaskWithAssignees, deleteTask as deleteTaskAPI, getAllTasksInRange, updateTask as updateTaskAPI } from '../api/tasks';
 import { queryClient } from '../query-client';
-import { scheduleTaskNotification, cancelAllNotificationsForTask, updateTaskNotification } from '../utils/task-notifications';
 import { supabase } from '../supabase';
+import type { CreateTaskInput, CreateTaskWithAssigneesInput, Task, TaskWithRollover, UpdateTaskInput } from '../types';
+import { cancelAllNotificationsForTask, scheduleTaskNotification, updateTaskNotification } from '../utils/task-notifications';
 
 interface CalendarState {
   // Data
@@ -69,6 +68,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const state = get();
     if (state.isInitialized && !force) return;
     
+    // 웹 환경에서 디버깅
+    if (Platform.OS === 'web') {
+      console.log('🔍 initializeCalendar called:', { isInitialized: state.isInitialized, force });
+    }
+    
     set({ isLoading: true, error: null });
     
     try {
@@ -92,11 +96,24 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         isInitialized: true,
       });
       
+      // 웹 환경에서 디버깅
+      if (Platform.OS === 'web') {
+        console.log('✅ initializeCalendar success:', { 
+          tasksCount: tasksWithRollover.length,
+          isInitialized: true 
+        });
+      }
+      
       // Start background prefetch after initial load (silent, non-blocking)
       setTimeout(() => {
         get().prefetchRemainingRange();
       }, 500);
     } catch (error: any) {
+      // 웹 환경에서 디버깅
+      if (Platform.OS === 'web') {
+        console.error('❌ initializeCalendar failed:', error);
+      }
+      
       set({ isLoading: false, error: error.message || 'Failed to initialize calendar' });
     }
   },
