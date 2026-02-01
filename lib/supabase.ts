@@ -89,12 +89,29 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // Supabase 연결 테스트 (웹 전용)
 if (Platform.OS === 'web') {
   console.log('🔍 Testing Supabase connection...');
-  supabase.from('profiles').select('count').then(
-    (result) => {
+  
+  // 타임아웃 추가
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Connection timeout after 5 seconds')), 5000);
+  });
+  
+  const connectionPromise = supabase.from('profiles').select('count').single();
+  
+  Promise.race([connectionPromise, timeoutPromise])
+    .then((result) => {
       console.log('✅ Supabase connection successful:', result);
-    },
-    (error) => {
+    })
+    .catch((error) => {
       console.error('❌ Supabase connection failed:', error);
-    }
-  );
+      console.error('Error details:', error.message);
+      
+      // 네트워크 탭에서 확인할 수 있도록 상세 정보
+      if (error.message.includes('timeout')) {
+        console.error('🔍 This appears to be a network/CORS issue');
+      } else if (error.message.includes('CORS')) {
+        console.error('🔍 CORS issue detected');
+      } else {
+        console.error('🔍 Other error:', error);
+      }
+    });
 }
