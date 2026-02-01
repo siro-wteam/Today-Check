@@ -9,16 +9,26 @@
  *    EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
  */
 
-import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createClient } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
+// 환경 변수 디버깅
+if (Platform.OS === 'web') {
+  console.log('🔍 Supabase Config Debug:');
+  console.log('supabaseUrl:', supabaseUrl ? '✅ Set' : '❌ Missing');
+  console.log('supabaseAnonKey:', supabaseAnonKey ? '✅ Set' : '❌ Missing');
+}
+
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('⚠️ Supabase credentials not found. Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your environment.');
+  console.error('❌ Supabase configuration error:');
+  console.error('supabaseUrl:', supabaseUrl);
+  console.error('supabaseAnonKey:', supabaseAnonKey);
+  throw new Error('Supabase URL and Anon Key are required. Please check your environment variables.');
 }
 
 // Custom storage for web platform

@@ -23,6 +23,13 @@ import { queryClient } from '@/lib/query-client';
 import { setQueryClientForGroupStore, useGroupStore } from '@/lib/stores/useGroupStore';
 import '../global.css';
 
+// 환경 변수 디버깅 (웹 전용)
+if (Platform.OS === 'web') {
+  console.log('🔍 Environment Variables Debug:');
+  console.log('EXPO_PUBLIC_SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
+  console.log('EXPO_PUBLIC_SUPABASE_ANON_KEY:', process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ? '✅ Set' : '❌ Missing');
+}
+
 // Keep the splash screen visible while we fetch resources
 // Use try-catch to handle cases where this might fail
 SplashScreen.preventAutoHideAsync().catch((error) => {
