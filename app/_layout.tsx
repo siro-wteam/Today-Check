@@ -16,6 +16,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 // Local imports
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { NotificationSettingsProvider } from '@/lib/contexts/NotificationSettingsContext';
 import { useAuth } from '@/lib/hooks/use-auth';
@@ -199,9 +200,11 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.gestureContainer}>
       <>
         <QueryClientProvider client={queryClient}>
-          <NotificationSettingsProvider>
-            <RootLayoutNav />
-          </NotificationSettingsProvider>
+          <ErrorBoundary>
+            <NotificationSettingsProvider>
+              <RootLayoutNav />
+            </NotificationSettingsProvider>
+          </ErrorBoundary>
         </QueryClientProvider>
         {Platform.OS === 'web' && <Toaster position="bottom-center" />}
       </>

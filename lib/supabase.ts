@@ -46,6 +46,7 @@ const customStorageAdapter = {
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(key, value);
+        return Promise.resolve();
       }
       return Promise.resolve();
     }
@@ -55,6 +56,7 @@ const customStorageAdapter = {
     if (Platform.OS === 'web') {
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem(key);
+        return Promise.resolve();
       }
       return Promise.resolve();
     }
@@ -62,11 +64,37 @@ const customStorageAdapter = {
   },
 };
 
+// Supabase 클라이언트 생성 (타임아웃 설정 추가)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: customStorageAdapter,
-    autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    storage: Platform.OS === 'web' ? customStorageAdapter : AsyncStorage,
+  },
+  global: {
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+  },
+  db: {
+    schema: 'public',
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 2,
+    },
   },
 });
+
+// Supabase 연결 테스트 (웹 전용)
+if (Platform.OS === 'web') {
+  console.log('🔍 Testing Supabase connection...');
+  supabase.from('profiles').select('count').then(
+    (result) => {
+      console.log('✅ Supabase connection successful:', result);
+    },
+    (error) => {
+      console.error('❌ Supabase connection failed:', error);
+    }
+  );
+}
