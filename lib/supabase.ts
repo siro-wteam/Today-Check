@@ -17,27 +17,17 @@ import { Platform } from 'react-native';
 const supabaseUrl = Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 
-// 임시 하드코딩 (Vercel 환경 변수 설정 전까지)
-const fallbackUrl = 'https://your-prod-project.supabase.co';
-const fallbackKey = 'your-prod-anon-key-here';
-
 // 환경 변수 디버깅
 if (Platform.OS === 'web') {
   console.log('🔍 Supabase Config Debug:');
   console.log('supabaseUrl:', supabaseUrl ? '✅ Set' : '❌ Missing');
   console.log('supabaseAnonKey:', supabaseAnonKey ? '✅ Set' : '❌ Missing');
-  console.log('fallbackUrl:', fallbackUrl);
-  console.log('fallbackKey:', fallbackKey ? '✅ Set' : '❌ Missing');
 }
 
-// 환경 변수가 없으면 임시 값 사용 (테스트용)
-const finalUrl = supabaseUrl || fallbackUrl;
-const finalKey = supabaseAnonKey || fallbackKey;
-
-if (!finalUrl || !finalKey) {
+if (!supabaseUrl || !supabaseAnonKey) {
   console.error('❌ Supabase configuration error:');
-  console.error('finalUrl:', finalUrl);
-  console.error('finalKey:', finalKey);
+  console.error('supabaseUrl:', supabaseUrl);
+  console.error('supabaseAnonKey:', supabaseAnonKey);
   throw new Error('Supabase URL and Anon Key are required. Please check your environment variables.');
 }
 
@@ -75,7 +65,7 @@ const customStorageAdapter = {
 };
 
 // Supabase 클라이언트 생성 (타임아웃 설정 추가)
-export const supabase = createClient(finalUrl, finalKey, {
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     storage: Platform.OS === 'web' ? customStorageAdapter : AsyncStorage,
