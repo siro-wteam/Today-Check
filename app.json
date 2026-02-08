@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.TodayCheck"
+      "bundleIdentifier": "com.siro.TodayCheck"
     },
     "android": {
       "adaptiveIcon": {
@@ -52,7 +52,8 @@
     ],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": true,
+      "tsConfigPaths": true
     }
   }
 }

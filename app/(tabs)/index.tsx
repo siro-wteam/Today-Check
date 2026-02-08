@@ -48,6 +48,7 @@ interface WeekPage {
 
 export default function WeekScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const { 
     tasks, 
     isLoading, 
@@ -61,10 +62,12 @@ export default function WeekScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   
-  // Initialize calendar on mount
+  // Initialize calendar only when user is ready (avoids empty tasks on first load)
   useEffect(() => {
-    initializeCalendar();
-  }, [initializeCalendar]);
+    if (user?.id) {
+      initializeCalendar();
+    }
+  }, [user?.id, initializeCalendar]);
   
   const flatListRef = useRef<FlatList>(null);
   const scrollViewRefs = useRef<Map<string, ScrollView>>(new Map());

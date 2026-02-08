@@ -6,12 +6,13 @@ import { NotificationSettingsModal } from '@/components/NotificationSettingsModa
 import { borderRadius, colors, spacing } from '@/constants/colors';
 import { getProfileStats, type ProfileStats } from '@/lib/api/profile-stats';
 import { signOut, useAuth } from '@/lib/hooks/use-auth';
+import { useFocusEffect } from '@react-navigation/native';
 import { Edit2, LogOut, Mail, User as UserIcon } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
 
 export default function ProfileScreen() {
-  const { user, profile, updateProfile } = useAuth();
+  const { user, profile, updateProfile, refreshProfile } = useAuth();
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   const [isNotificationSettingsVisible, setIsNotificationSettingsVisible] = useState(false);
@@ -19,12 +20,41 @@ export default function ProfileScreen() {
   const [profileStats, setProfileStats] = useState<ProfileStats | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
 
-  // Load profile stats on component mount
+  // Load profile stats when user is ready
   useEffect(() => {
+    if (!user?.id) {
+      setProfileStats(null);
+      setIsLoadingStats(false);
+      return;
+    }
     loadProfileStats();
-  }, []);
+  }, [user?.id]);
+
+  // Reload profile + stats when Profile tab gains focus (recover from failed or early first load)
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return;
+      refreshProfile();
+      let cancelled = false;
+      (async () => {
+        try {
+          setIsLoadingStats(true);
+          const { data, error } = await getProfileStats();
+          if (!cancelled && data && !error) setProfileStats(data);
+        } catch (e) {
+          if (!cancelled) console.error('Error loading profile stats:', e);
+        } finally {
+          if (!cancelled) setIsLoadingStats(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [user?.id, refreshProfile])
+  );
 
   const loadProfileStats = async () => {
+    if (!user?.id) return;
     try {
       setIsLoadingStats(true);
       const { data, error } = await getProfileStats();
@@ -69,6 +99,18 @@ export default function ProfileScreen() {
       ]);
     }
   };
+
+  // Wait for user so profile/email are available (avoids empty on first load)
+  if (!user) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+        <AppHeader onNotificationPress={handleNotificationPress} />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>

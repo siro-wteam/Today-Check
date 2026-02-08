@@ -6,10 +6,12 @@ import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { showToast } from '@/utils/toast';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
+import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { Crown, Plus, UserPlus, Users } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Platform,
     Pressable,
     RefreshControl,
@@ -31,13 +33,23 @@ export default function GroupScreen() {
   const insets = useSafeAreaInsets();
   const isActioningRef = useRef(false);
 
-  // Fetch groups on mount (only once)
+  // Fetch groups when user is ready
   useEffect(() => {
     if (user?.id) {
       fetchMyGroups(user.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  // Refetch when Group tab gains focus (recover from failed or early first load)
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) {
+        fetchMyGroups(user.id);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id])
+  );
 
   // Pull-to-Refresh handler
   const onRefresh = useCallback(async () => {
@@ -103,6 +115,22 @@ export default function GroupScreen() {
   // groups already contains only groups the user is a member of (from fetchMyGroups)
   const myGroups = groups;
 
+  // Wait for user so fetch runs with valid session (avoids empty on first load)
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.container}>
+        {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>My Groups</Text>
+          <View style={styles.headerActions} />
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Android only: Add top padding for status bar */}
@@ -157,7 +185,11 @@ export default function GroupScreen() {
           />
         }
       >
-        {myGroups.length === 0 ? (
+        {loading && myGroups.length === 0 ? (
+          <View style={{ flex: 1, minHeight: 200, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : myGroups.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconContainer}>
               <Users size={40} color={colors.textSub} strokeWidth={2} />

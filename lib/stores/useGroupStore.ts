@@ -94,12 +94,22 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         return { success: false, error: errorMessage };
       }
 
-      // Optimistic update: Add new group to local state immediately
+      // Add new group to local state and refresh list from server so RLS-visible data is in sync
       set((state) => ({
         groups: [data, ...state.groups],
         loading: false,
         currentGroup: data,
       }));
+      fetchMyGroupsAPI(userId).then((res) => {
+        if (res.data && res.data.length > 0) {
+          set((state) => {
+            const updatedCurrent = state.currentGroup?.id
+              ? res.data!.find((g) => g.id === state.currentGroup!.id) ?? state.currentGroup
+              : state.currentGroup;
+            return { groups: res.data!, currentGroup: updatedCurrent ?? state.currentGroup };
+          });
+        }
+      }).catch(() => {});
 
       return { success: true };
     } catch (err: any) {

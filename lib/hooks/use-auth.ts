@@ -136,6 +136,14 @@ async function ensureAuthListenerInitialized() {
   if (authListenerInitialized) return;
   authListenerInitialized = true;
 
+  // 세션 복구를 먼저 완료시켜 INITIAL_SESSION 타이밍 경쟁 제거
+  // (리스너 등록 전에 getSession을 호출해야 초기 로딩 시 태스크가 비는 현상 방지)
+  try {
+    await supabase.auth.getSession();
+  } catch (e) {
+    console.warn('[Auth] getSession on init failed:', e);
+  }
+
   supabase.auth.onAuthStateChange(async (event, session) => {
   // Only log non-initial events to reduce noise
   if (event !== 'INITIAL_SESSION') {
@@ -194,13 +202,11 @@ async function ensureAuthListenerInitialized() {
     return;
   }
 
-  // SIGNED_IN: 캘린더 스토어는 유지 (기존 로직 유지)
-  if (event === 'SIGNED_IN' && session?.user?.id) {
+  // INITIAL_SESSION 또는 SIGNED_IN 시 캘린더를 초기화 플래그만 리셋 (다음 진입 시 다시 fetch)
+  // 최초 로딩 시 태스크가 비는 현상 방지: 세션 준비 후 홈에서만 fetch 하도록
+  if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user?.id) {
     const { useCalendarStore } = await import('../stores/useCalendarStore');
-    const calendarState = useCalendarStore.getState();
-    console.log(
-      `[Auth] SIGNED_IN event (${Platform.OS}) - Preserving calendar data. isInitialized: ${calendarState.isInitialized}, tasks count: ${calendarState.tasks.length}`,
-    );
+    useCalendarStore.getState().resetInitialization();
   }
 
   // 세션/유저 기본 상태 업데이트

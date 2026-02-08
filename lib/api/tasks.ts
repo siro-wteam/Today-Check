@@ -2,15 +2,124 @@
  * Tasks API - CRUD operations for tasks
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { addDays, differenceInCalendarDays, format, parse, parseISO } from 'date-fns';
-import { supabase } from '../supabase';
-import type {
-    CreateTaskInput,
-    CreateTaskWithAssigneesInput,
-    Task,
-    TaskWithRollover,
-    UpdateTaskInput,
-} from '../types';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+
+// Supabase 클라이언트 import
+const supabase: SupabaseClient = createClient(
+  Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '',
+  Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+  {
+    auth: {
+      storage: Platform.OS === 'web' ? {
+        getItem: (key: string) => {
+          if (typeof window !== 'undefined') {
+            return Promise.resolve(window.localStorage.getItem(key));
+          }
+          return Promise.resolve(null);
+        },
+        setItem: (key: string, value: string) => {
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(key, value);
+          }
+          return Promise.resolve();
+        },
+        removeItem: (key: string) => {
+          if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(key);
+          }
+          return Promise.resolve();
+        },
+      } : AsyncStorage,
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+    },
+  }
+);
+
+// 타입 단순화를 위한 any 타입 사용
+export type SupabaseResult<T> = {
+  data: T | null;
+  error: Error | null;
+};
+
+export type SupabaseUpdateResult = SupabaseResult<any[]>;
+export type SupabaseSelectResult<T> = SupabaseResult<T>;
+
+// Task 인터페이스 정의
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  status: 'TODO' | 'DONE' | 'CANCELLED';
+  due_date: string | null;
+  due_time: string | null;
+  original_due_date: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+  group_id: string | null;
+  creator_id: string;
+  task_assignees?: any;
+}
+
+export interface TaskWithRollover {
+  id: string;
+  title: string;
+  description: string | null;
+  status: 'TODO' | 'DONE' | 'CANCELLED';
+  due_date: string | null;
+  due_time: string | null;
+  original_due_date: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+  group_id: string | null;
+  creator_id: string;
+  task_assignees?: any;
+  rollover_info?: {
+    id: string;
+    days_overdue: number;
+    is_overdue: boolean;
+    display_text: string;
+    next_due_date: string | null;
+  };
+}
+
+export interface CreateTaskInput {
+  title: string;
+  description?: string;
+  status?: 'TODO' | 'DONE' | 'CANCELLED';
+  due_date?: string;
+  due_time?: string;
+  group_id?: string;
+  assignee_ids?: string[];
+}
+
+export interface CreateTaskWithAssigneesInput {
+  title: string;
+  description?: string;
+  due_date?: string;
+  due_time?: string;
+  group_id?: string;
+  assignees?: { user_id: string; is_completed?: boolean }[];
+}
+
+export interface UpdateTaskInput {
+  id: string;
+  title?: string;
+  description?: string;
+  status?: 'TODO' | 'DONE' | 'CANCELLED';
+  due_date?: string;
+  due_time?: string;
+  completed_at?: string | null;
+}
 
 /**
  * Get all tasks for the current user (excluding soft-deleted)
@@ -420,15 +529,15 @@ export function calculateTaskProgress(
   myCompletion: boolean;
   displayText: string;
 } {
-  const assignees = task.assignees || [];
+  const assignees = Array.isArray(task.task_assignees) ? task.task_assignees : [];
   const totalCount = assignees.length;
-  const completedCount = assignees.filter(a => a.is_completed).length;
+  const completedCount = assignees.filter((a: { is_completed?: boolean }) => a.is_completed).length;
   const progressPercent = totalCount > 0 
     ? Math.round((completedCount / totalCount) * 100) 
     : 0;
   
   const myCompletion = currentUserId
-    ? assignees.find(a => a.user_id === currentUserId)?.is_completed || false
+    ? assignees.find((a: { user_id: string }) => a.user_id === currentUserId)?.is_completed || false
     : false;
 
   const displayText = totalCount > 0 
@@ -449,11 +558,28 @@ export function calculateTaskProgress(
  * For group tasks with multiple assignees, use createTaskWithAssignees instead
  */
 export async function createTask(input: CreateTaskInput) {
-  const { data: { user } } = await supabase.auth.getUser();
+  // 🔍 인증 상태 확인 및 대기
+  let user = null;
+  let retries = 0;
+  const maxRetries = 3;
+  
+  while (!user && retries < maxRetries) {
+    const { data: userData } = await supabase.auth.getUser();
+    user = userData?.user;
+    
+    if (!user) {
+      console.log(`⏳ User not ready, retrying... (${retries + 1}/${maxRetries})`);
+      await new Promise(resolve => setTimeout(resolve, 500)); // 500ms 대기
+      retries++;
+    }
+  }
   
   if (!user) {
+    console.error('🚨 User authentication failed after retries');
     return { data: null, error: new Error('User not authenticated') };
   }
+  
+  console.log('✅ User authenticated:', { id: user.id, email: user.email });
 
   // Step 1: Insert the task (INSERT policy only checks creator_id)
   const taskData = {
@@ -482,9 +608,15 @@ export async function createTask(input: CreateTaskInput) {
     .from('task_assignees')
     .insert({
       task_id: task.id,
-      user_id: input.assignee_id || user.id,
+      user_id: input.assignee_ids?.[0] ?? user.id,
       is_completed: false,
     });
+
+  // 🔍 user.id 확인 로직
+  if (!user.id) {
+    console.error('🚨 Critical: user.id is undefined!', { user, input });
+    return { data: null, error: new Error('User not authenticated') };
+  }
 
   if (assigneeError) {
     console.error('Error creating task assignee:', assigneeError);
@@ -532,7 +664,7 @@ export async function createTaskWithAssignees(input: CreateTaskWithAssigneesInpu
     return { data: null, error: new Error('User not authenticated') };
   }
 
-  // Note: assignee_ids can be empty array - group tasks can exist without assignees
+  // Note: assignees can be empty array - group tasks can exist without assignees
 
   // Step 1: Create the task
   const taskData = {
@@ -557,11 +689,11 @@ export async function createTaskWithAssignees(input: CreateTaskWithAssigneesInpu
   }
 
   // Step 2: Add assignees only if provided
-  if (input.assignee_ids && input.assignee_ids.length > 0) {
-    const assigneeData = input.assignee_ids.map(assigneeId => ({
+  if (input.assignees && input.assignees.length > 0) {
+    const assigneeData = input.assignees.map(a => ({
       task_id: task.id,
-      user_id: assigneeId,
-      is_completed: false,
+      user_id: a.user_id,
+      is_completed: a.is_completed ?? false,
     }));
 
     const { error: assigneeError } = await supabase
@@ -615,7 +747,7 @@ export async function createTaskWithAssignees(input: CreateTaskWithAssigneesInpu
 export async function toggleAssigneeCompletion(
   taskId: string,
   assigneeId: string,
-  currentStatus: boolean
+  currentStatus?: boolean
 ): Promise<{ data: boolean | null; error: Error | null }> {
   try {
     // Calculate new status
@@ -623,7 +755,7 @@ export async function toggleAssigneeCompletion(
     const completedAt = newStatus ? new Date().toISOString() : null;
 
     // Update assignee completion (1 API call)
-    const { data: updateResult, error: updateError, count } = await supabase
+    const { data: updateResult, error: updateError } = await supabase
       .from('task_assignees')
       .update({
         is_completed: newStatus,
@@ -631,52 +763,20 @@ export async function toggleAssigneeCompletion(
       })
       .eq('task_id', taskId)
       .eq('user_id', assigneeId)
-      .select();
+      .select() as any;
 
     if (updateError) {
       console.error('🔴 [API toggleAssigneeCompletion] Error updating assignee:', updateError);
       return { data: null, error: updateError };
     }
 
-    if (!updateResult || updateResult.length === 0) {
+    if (!updateResult || (Array.isArray(updateResult) && updateResult.length === 0)) {
       console.error('🔴 [API toggleAssigneeCompletion] No rows updated! Assignee not found.');
       return { data: null, error: new Error('Assignee not found') };
     }
 
-    if (updateResult.length > 1) {
-      console.error('[API toggleAssigneeCompletion] WARNING: Multiple rows updated!', updateResult.length, 'rows');
-    }
+    return { data: true, error: null };
 
-    // Fetch latest assignee states from DB to calculate task status accurately
-    const { data: latestAssignees, error: fetchError } = await supabase
-      .from('task_assignees')
-      .select('user_id, is_completed')
-      .eq('task_id', taskId);
-
-    if (fetchError) {
-      console.error('[API toggleAssigneeCompletion] Error fetching latest assignees:', fetchError);
-      return { data: null, error: fetchError };
-    }
-
-    // Calculate task status based on LATEST DB state
-    const allCompleted = latestAssignees?.every(a => a.is_completed) ?? false;
-    const taskStatus = allCompleted ? 'DONE' : 'TODO';
-
-    // Update task status (2nd API call)
-    const { error: taskUpdateError } = await supabase
-      .from('tasks')
-      .update({
-        status: taskStatus,
-        completed_at: allCompleted ? new Date().toISOString() : null,
-      })
-      .eq('id', taskId);
-
-    if (taskUpdateError) {
-      console.error('[API toggleAssigneeCompletion] Error updating task status:', taskUpdateError);
-      // Don't fail the whole operation, assignee update succeeded
-    }
-
-    return { data: newStatus, error: null };
   } catch (error) {
     console.error('[API toggleAssigneeCompletion] Exception:', error);
     return { data: null, error: error as Error };
@@ -780,7 +880,14 @@ export async function toggleMyTaskCompletion(taskId: string) {
     return { data: null, error: new Error('User not authenticated') };
   }
 
-  return toggleAssigneeCompletion(taskId, user.id);
+  const { data: assignee } = await supabase
+    .from('task_assignees')
+    .select('is_completed')
+    .eq('task_id', taskId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  const currentStatus = assignee?.is_completed ?? false;
+  return toggleAssigneeCompletion(taskId, user.id, currentStatus);
 }
 
 /**
@@ -1092,7 +1199,7 @@ export async function getUserStats(userId: string): Promise<{
       .not('completed_at', 'is', null)
       .is('deleted_at', null);
 
-    completedTasksQueries.push(personalCompletedQuery);
+    completedTasksQueries.push(personalCompletedQuery as unknown as Promise<any>);
 
     // Group tasks where user is OWNER/ADMIN (all tasks in group)
     if (ownerAdminGroupIds.length > 0) {
@@ -1104,7 +1211,7 @@ export async function getUserStats(userId: string): Promise<{
         .not('completed_at', 'is', null)
         .is('deleted_at', null);
 
-      completedTasksQueries.push(ownerAdminCompletedQuery);
+      completedTasksQueries.push(ownerAdminCompletedQuery as unknown as Promise<any>);
     }
 
     // Group tasks where user is MEMBER (only assigned tasks)
@@ -1131,10 +1238,10 @@ export async function getUserStats(userId: string): Promise<{
         .not('completed_at', 'is', null)
         .is('deleted_at', null);
 
-      completedTasksQueries.push(memberCompletedQuery);
+      completedTasksQueries.push(memberCompletedQuery as unknown as Promise<any>);
     }
 
-    // Execute all queries
+    // Execute all queries (Supabase query builders are thenable)
     const completedResults = await Promise.all(completedTasksQueries);
     const allCompletedTasks: any[] = [];
     let completedError: any = null;
@@ -1193,7 +1300,7 @@ export async function getUserStats(userId: string): Promise<{
       .eq('creator_id', userId)
       .is('deleted_at', null);
 
-    incompleteTasksQueries.push(personalIncompleteQuery);
+    incompleteTasksQueries.push(personalIncompleteQuery as unknown as Promise<any>);
 
     // Group tasks where user is OWNER/ADMIN (all tasks in group)
     if (ownerAdminGroupIds.length > 0) {
@@ -1204,7 +1311,7 @@ export async function getUserStats(userId: string): Promise<{
         .in('group_id', ownerAdminGroupIds)
         .is('deleted_at', null);
 
-      incompleteTasksQueries.push(ownerAdminIncompleteQuery);
+      incompleteTasksQueries.push(ownerAdminIncompleteQuery as unknown as Promise<any>);
     }
 
     // Group tasks where user is MEMBER (only assigned tasks)
@@ -1229,10 +1336,10 @@ export async function getUserStats(userId: string): Promise<{
         .eq('task_assignees.is_completed', false)
         .is('deleted_at', null);
 
-      incompleteTasksQueries.push(memberIncompleteQuery);
+      incompleteTasksQueries.push(memberIncompleteQuery as unknown as Promise<any>);
     }
 
-    // Execute all incomplete queries
+    // Execute all incomplete queries (Supabase query builders are thenable)
     const incompleteResults = await Promise.all(incompleteTasksQueries);
     const allIncompleteTasks: any[] = [];
     let incompleteError: any = null;
@@ -1319,7 +1426,7 @@ export async function getUserStats(userId: string): Promise<{
       .eq('creator_id', userId)
       .is('deleted_at', null);
 
-    backlogTasksQueries.push(personalBacklogQuery);
+    backlogTasksQueries.push(personalBacklogQuery as unknown as Promise<any>);
 
     // Group backlog tasks where user is OWNER/ADMIN (all tasks in group)
     if (ownerAdminGroupIds.length > 0) {
@@ -1331,7 +1438,7 @@ export async function getUserStats(userId: string): Promise<{
         .in('group_id', ownerAdminGroupIds)
         .is('deleted_at', null);
 
-      backlogTasksQueries.push(ownerAdminBacklogQuery);
+      backlogTasksQueries.push(ownerAdminBacklogQuery as unknown as Promise<any>);
     }
 
     // Group backlog tasks where user is MEMBER (only assigned tasks)
@@ -1350,10 +1457,10 @@ export async function getUserStats(userId: string): Promise<{
         .eq('task_assignees.user_id', userId)
         .is('deleted_at', null);
 
-      backlogTasksQueries.push(memberBacklogQuery);
+      backlogTasksQueries.push(memberBacklogQuery as unknown as Promise<any>);
     }
 
-    // Execute all backlog queries
+    // Execute all backlog queries (Supabase query builders are thenable)
     const backlogResults = await Promise.all(backlogTasksQueries);
     const allBacklogTasks: any[] = [];
     let backlogError: any = null;
