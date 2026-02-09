@@ -23,6 +23,18 @@ echo "✅ 감지된 IP 주소: $IP"
 echo "🚀 iOS 기기에서 앱 실행 중..."
 echo "📦 Metro bundler가 자동으로 시작됩니다..."
 
-# IP 주소를 환경 변수로 설정하고 실행
+# IP 주소를 환경 변수로 설정하고 실행 (빌드 + 설치; devicectl 이슈로 자동 실행이 실패할 수 있음)
 # 자동 서명 활성화를 위해 환경 변수 추가
 EXPO_XCODE_ALLOW_PROVISIONING_UPDATES=true REACT_NATIVE_PACKAGER_HOSTNAME=$IP npx expo run:ios --device
+EXIT_CODE=$?
+if [ "$EXIT_CODE" -ne 0 ]; then
+  echo ""
+  echo "⚠️  앱이 기기에서 자동 실행되지 않았을 수 있습니다."
+  echo "   기기에서: 설정 → 일반 → VPN 및 기기 관리 → 개발자 앱 → 신뢰"
+  echo ""
+fi
+# run:ios 종료 후에도 Metro를 계속 띄워 둠 (devicectl 경고 시 자동 실행이 안 되어도 기기에서 수동 실행 가능)
+echo ""
+echo "📦 Metro bundler를 실행합니다. 기기에서 앱을 열면 연결됩니다. 종료: Ctrl+C"
+echo ""
+REACT_NATIVE_PACKAGER_HOSTNAME=$IP npx expo start

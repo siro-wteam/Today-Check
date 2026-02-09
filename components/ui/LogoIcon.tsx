@@ -6,7 +6,7 @@ interface LogoIconProps {
   color?: string;
 }
 
-export function LogoIcon({ size = 32, color = '#0080F0' }: LogoIconProps) {
+export function LogoIcon({ size = 32, color = '#2563eb' }: LogoIconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 40 40" fill="none">
       {/* Blue square background */}

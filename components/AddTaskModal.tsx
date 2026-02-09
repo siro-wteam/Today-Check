@@ -330,7 +330,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                         }}
                         className={`px-4 py-2 rounded-full flex-row items-center gap-2 ${
                           selectedGroupId === group.id
-                            ? 'bg-blue-600'
+                            ? 'bg-primary'
                             : 'bg-gray-100 dark:bg-gray-800'
                         }`}
                       >
@@ -388,7 +388,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                             }}
                             className={`px-4 py-2 rounded-full flex-row items-center gap-2 border-2 ${
                               isSelected
-                                ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-600'
+                                ? 'bg-blue-50 dark:bg-blue-900/30 border-primary'
                                 : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                             }`}
                           >
@@ -405,7 +405,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                             <Text
                               className={`font-semibold ${
                                 isSelected
-                                  ? 'text-blue-600 dark:text-blue-400'
+                                  ? 'text-primary dark:text-primary'
                                   : 'text-gray-700 dark:text-gray-300'
                               }`}
                             >
@@ -438,7 +438,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                   }}
                   className={`px-4 py-2 rounded-full ${
                     isDateSelected(new Date())
-                      ? 'bg-blue-600'
+                      ? 'bg-primary'
                       : 'bg-gray-100 dark:bg-gray-800'
                   }`}
                 >
@@ -463,7 +463,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                   }}
                   className={`px-4 py-2 rounded-full ${
                     isDateSelected(addDays(new Date(), 1))
-                      ? 'bg-blue-600'
+                      ? 'bg-primary'
                       : 'bg-gray-100 dark:bg-gray-800'
                   }`}
                 >
@@ -488,7 +488,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                   }}
                   className={`px-4 py-2 rounded-full ${
                     dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
-                      ? 'bg-blue-600'
+                      ? 'bg-primary'
                       : 'bg-gray-100 dark:bg-gray-800'
                   }`}
                 >
@@ -531,7 +531,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                       value={dueDate || new Date()} // Default: today
                       mode="date"
                       display="inline"
-                      accentColor="#2563eb" // Blue-600
+                      accentColor="#2563eb" // theme primary (V0 blue)
                       minimumDate={new Date()} // Prevent past dates
                       onChange={(event, selectedDate) => {
                         if (selectedDate) {
@@ -572,7 +572,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                         }
                         setShowDatePicker(false);
                       }}
-                      className="flex-1 bg-blue-600 rounded-xl py-3 items-center"
+                      className="flex-1 bg-primary rounded-xl py-3 items-center"
                     >
                       <Text className="text-white font-semibold">Apply</Text>
                     </Pressable>
@@ -617,7 +617,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                         }
                         setShowTimePicker(false);
                       }}
-                      className="flex-1 bg-blue-600 rounded-xl py-3 items-center"
+                      className="flex-1 bg-primary rounded-xl py-3 items-center"
                     >
                       <Text className="text-white font-semibold">Apply</Text>
                     </Pressable>
@@ -766,7 +766,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                       }
                       handleSave();
                     }}
-                    className={`flex-1 bg-blue-600 rounded-xl py-4 items-center ${
+                    className={`flex-1 bg-primary rounded-xl py-4 items-center ${
                       isCreating ? 'opacity-50' : ''
                     }`}
                     disabled={isCreating}

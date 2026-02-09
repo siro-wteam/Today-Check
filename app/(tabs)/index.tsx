@@ -437,51 +437,54 @@ export default function WeekScreen() {
         onClose={() => setIsNotificationModalVisible(false)}
       />
       
-      {/* Week Progress Card */}
+      {/* Week Progress Card - 상단 영역 축소, % 동그라미·숫자 확대 */}
       <View 
         style={[
           {
             backgroundColor: colors.primary,
             marginHorizontal: 16,
-            marginTop: 12,
-            marginBottom: 16,
-            paddingHorizontal: 20,
-            paddingVertical: 18,
+            marginTop: 8,
+            marginBottom: 10,
+            paddingHorizontal: 16,
+            paddingVertical: 12,
             borderRadius: borderRadius.xl,
             ...shadows.sm,
           },
           Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center', marginHorizontal: 'auto' as any },
         ]}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <Text style={{ fontSize: 15, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
-            {progressTitle}
-          </Text>
-          {/* Only show percentage for current week */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
+              {progressTitle}
+            </Text>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
+              {progressText}
+            </Text>
+          </View>
+          {/* Only show percentage for current week - V0 스타일: 동그라미 안에 % (크게) */}
           {isCurrentWeek && (
             <View 
               style={{
+                width: 64,
+                height: 64,
+                borderRadius: 32,
                 backgroundColor: 'rgba(255, 255, 255, 0.25)',
-                paddingHorizontal: 14,
-                paddingVertical: 6,
-                borderRadius: borderRadius.full,
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <Text style={{ fontSize: 16, fontWeight: '700', color: colors.primaryForeground }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground }}>
                 {progressPercent}%
               </Text>
             </View>
           )}
         </View>
-        
-        <Text style={{ fontSize: 24, fontWeight: '700', color: colors.primaryForeground, marginBottom: 12 }}>
-          {progressText}
-        </Text>
-        
         {totalTasks > 0 && (
           <View 
             style={{
               height: 6,
+              marginTop: 10,
               borderRadius: borderRadius.full,
               backgroundColor: 'rgba(255, 255, 255, 0.2)',
               overflow: 'hidden',
@@ -499,15 +502,15 @@ export default function WeekScreen() {
         )}
       </View>
       
-      {/* Week Navigator */}
+      {/* Week Navigator - no separate background (match V0) */}
       <View 
         style={[
           {
-            backgroundColor: colors.card,
+            backgroundColor: colors.background,
             paddingHorizontal: 24,
             paddingVertical: 14,
             borderBottomWidth: 1,
-            borderBottomColor: colors.border,
+            borderBottomColor: colors.borderLight,
           },
           Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' },
         ]}
@@ -1056,7 +1059,7 @@ const DailyCard = React.memo(function DailyCard({
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-            <Text style={{ fontSize: 16, fontWeight: '600', color: colors.textMain, marginRight: 12 }}>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: isToday ? colors.primary : colors.textMain, marginRight: 12 }}>
               {String(group.displayDate)}
             </Text>
           </View>
@@ -1265,19 +1268,18 @@ const DailyCard = React.memo(function DailyCard({
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
+                  backgroundColor: 'transparent',
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                  paddingHorizontal: 20,
+                  paddingVertical: 10,
                   marginTop: 8,
                   borderRadius: borderRadius.md,
-                  backgroundColor: 'transparent',
-                  borderWidth: 2,
-                  borderColor: 'rgba(156, 163, 175, 0.2)',
-                  borderStyle: 'dashed',
                 }}
               >
-                <Plus size={16} color={colors.textSub} strokeWidth={2} />
-                <Text style={{ fontSize: 14, color: colors.textSub, fontWeight: '500', marginLeft: 6 }}>
-                  Add a task
+                <Plus size={16} color="#94A3B8" strokeWidth={2} />
+                <Text style={{ fontSize: 14, color: '#94A3B8', fontWeight: '500', marginLeft: 6 }}>
+                  Tap to add
                 </Text>
               </Pressable>
             )}

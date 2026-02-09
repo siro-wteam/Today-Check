@@ -677,20 +677,17 @@ export default function HomeScreen() {
                         style={{
                           flexDirection: 'row',
                           alignItems: 'center',
-                          backgroundColor: colors.primary,
-                          paddingHorizontal: 24,
-                          paddingVertical: 12,
-                          borderRadius: borderRadius.full,
-                          gap: 6,
+                          backgroundColor: 'transparent',
+                          borderWidth: 1,
+                          borderColor: '#E2E8F0',
+                          paddingHorizontal: 20,
+                          paddingVertical: 10,
+                          borderRadius: borderRadius.md,
                         }}
                       >
-                        <Plus size={16} color={colors.primaryForeground} strokeWidth={2.5} />
-                        <Text style={{
-                          fontSize: 16,
-                          color: colors.primaryForeground,
-                          fontWeight: '600',
-                        }}>
-                          Add Task
+                        <Plus size={16} color="#94A3B8" strokeWidth={2} />
+                        <Text style={{ fontSize: 14, color: '#94A3B8', fontWeight: '500', marginLeft: 6 }}>
+                          Tap to add
                         </Text>
                       </Pressable>
                     </View>
@@ -722,24 +719,18 @@ export default function HomeScreen() {
                         flexDirection: 'row',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        paddingVertical: 12,
-                        paddingHorizontal: 16,
+                        backgroundColor: 'transparent',
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0',
+                        paddingHorizontal: 20,
+                        paddingVertical: 10,
                         marginTop: 8,
                         borderRadius: borderRadius.md,
-                        backgroundColor: 'transparent',
-                        borderWidth: 2,
-                        borderColor: 'rgba(156, 163, 175, 0.2)',
-                        borderStyle: 'dashed',
-                        gap: 6,
                       }}
                     >
-                      <Plus size={16} color={colors.textSub} strokeWidth={2} />
-                      <Text style={{
-                        fontSize: 14,
-                        color: colors.textSub,
-                        fontWeight: '500',
-                      }}>
-                        Add a task
+                      <Plus size={16} color="#94A3B8" strokeWidth={2} />
+                      <Text style={{ fontSize: 14, color: '#94A3B8', fontWeight: '500', marginLeft: 6 }}>
+                        Tap to add
                       </Text>
                     </Pressable>
                   )}

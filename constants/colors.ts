@@ -1,43 +1,43 @@
 /**
- * Modern Minimalist Color System (Linear Style)
- * Consistent color palette for the entire app
+ * Color System - v0 참고 소스(task-management-app) primary blue
+ * V0와 동일한 진한 블루 (blue-600)
  */
 
 export const colors = {
-  // Primary - v0 디자인 색상 적용
-  primary: '#0080F0', // v0 디자인 Primary 색상
-  primaryDark: '#0066C0', // Darker blue for active states
-  primaryForeground: '#FFFFFF', // White text on primary background
+  // Primary - V0 진한 블루 (Tailwind blue-600)
+  primary: '#2563eb',
+  primaryDark: '#1d4ed8', // blue-700, active/pressed
+  primaryForeground: '#FFFFFF', // primary-foreground
   
-  // Backgrounds
-  background: '#FAFAFA', // Off White - Main BG
-  card: '#FFFFFF', // Pure White - Card/Item BG
+  // Backgrounds - 참고 소스 :root
+  background: '#F8FAFC',   // oklch(0.98 0.005 250)
+  card: '#FFFFFF',         // oklch(1 0 0)
   
-  // Text - v0 디자인 색상 적용
-  textMain: '#222B38', // v0 디자인 Text Main 색상
-  textSub: '#6B7280', // Cool Gray - Secondary text
-  textDisabled: '#D1D5DB', // Very light gray - Disabled
+  // Text - foreground: oklch(0.2 0.02 260), muted-foreground: oklch(0.5 0.02 260)
+  textMain: '#1e293b',
+  textSub: '#64748b',
+  textDisabled: '#94a3b8',
   
-  // Status Colors - v0 디자인 색상 적용
-  error: '#EF4444', // Soft Red - Overdue/Error
-  warning: '#F59E0B', // Orange - Late completion
-  success: '#00A855', // v0 디자인 Success 색상
+  // Status - 참고 소스 destructive, success, warning
+  error: '#dc2626',        // oklch(0.6 0.2 25)
+  warning: '#d97706',      // oklch(0.75 0.15 65)
+  success: '#16a34a',      // oklch(0.65 0.18 145)
   
-  // Neutral Shades
-  gray50: '#F9FAFB',
-  gray100: '#F3F4F6',
-  gray200: '#E5E7EB',
-  gray300: '#D1D5DB',
-  gray400: '#9CA3AF',
-  gray500: '#6B7280',
-  gray600: '#4B5563',
-  gray700: '#374151',
-  gray800: '#1F2937',
-  gray900: '#111827',
+  // Neutral / Secondary - secondary: oklch(0.96 0.01 250), muted: oklch(0.95 0.01 250)
+  gray50: '#F8FAFC',
+  gray100: '#F1F5F9',
+  gray200: '#e2e8f0',      // border: oklch(0.92 0.01 250)
+  gray300: '#cbd5e1',
+  gray400: '#94a3b8',
+  gray500: '#64748b',
+  gray600: '#475569',
+  gray700: '#334155',
+  gray800: '#1e293b',
+  gray900: '#0f172a',
   
   // Borders
-  border: '#E5E7EB',
-  borderLight: '#F3F4F6',
+  border: '#e2e8f0',       // oklch(0.92 0.01 250)
+  borderLight: '#f1f5f9',
   
   // Overlays
   overlay: 'rgba(0, 0, 0, 0.05)',

@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand';
-import { format, startOfDay } from 'date-fns';
+import { format, parseISO, startOfDay } from 'date-fns';
 import { getWeeklyCalendarRanges } from '../../constants/calendar';
 import { getAllTasksInRange } from '../api/tasks';
 import { createTask, createTaskWithAssignees, updateTask as updateTaskAPI, deleteTask as deleteTaskAPI } from '../api/tasks';
@@ -170,6 +170,17 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     
     if (!task) {
       return { success: false, error: 'Task not found' };
+    }
+    
+    const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    const isFutureDue = task.due_date != null && task.due_date > todayStr;
+    if (isFutureDue && updateFields.status !== undefined) {
+      if (updateFields.status === 'DONE') {
+        showToast('info', 'Marked as done', "It will appear under today's completed list.");
+      } else if (updateFields.status === 'TODO') {
+        const dueLabel = format(parseISO(task.due_date), 'MMM d (EEE)');
+        showToast('info', 'Back to incomplete', `It will appear on ${dueLabel} again.`);
+      }
     }
     
     // Optimistic update: Update immediately in store

@@ -1110,7 +1110,7 @@ export default function GroupDetailScreen() {
                     )}
                     {member.role === 'ADMIN' && (
                       <View style={styles.adminBadge}>
-                        <Shield size={14} color="#3B82F6" strokeWidth={2} />
+                        <Shield size={14} color={colors.primary} strokeWidth={2} />
                         <Text style={[styles.adminBadgeText, { marginLeft: 4 }]}>Admin</Text>
                       </View>
                     )}
@@ -1393,7 +1393,7 @@ const styles = StyleSheet.create({
   adminBadgeText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#3B82F6',
+    color: colors.primary,
     marginLeft: 4,
   },
   youBadge: {

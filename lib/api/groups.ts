@@ -53,7 +53,7 @@ export async function createGroup(name: string, userId: string): Promise<{ data:
               id: userId,
               name: 'You',
               role: 'OWNER' as const,
-              profileColor: '#0080F0',
+              profileColor: '#2563eb', // theme primary (V0 blue)
               joinedAt: now,
             },
           ],

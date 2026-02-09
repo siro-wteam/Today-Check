@@ -191,7 +191,7 @@ export default function AuthScreen() {
           <Pressable
             onPress={handleAuth}
             disabled={loading}
-            className={`bg-blue-600 rounded-xl py-4 items-center mt-6 ${
+            className={`bg-primary rounded-xl py-4 items-center mt-6 ${
               loading ? 'opacity-50' : 'active:opacity-70'
             }`}
           >
@@ -210,7 +210,7 @@ export default function AuthScreen() {
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}
             </Text>
             <Pressable onPress={() => setIsSignUp(!isSignUp)} disabled={loading}>
-              <Text className="text-blue-600 font-semibold ml-1">
+              <Text className="text-primary font-semibold ml-1">
                 {isSignUp ? 'Sign In' : 'Sign Up'}
               </Text>
             </Pressable>

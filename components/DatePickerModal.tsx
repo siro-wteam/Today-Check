@@ -1,3 +1,4 @@
+import { colors } from '@/constants/colors';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { Calendar } from 'lucide-react-native';
@@ -85,7 +86,7 @@ export function DatePickerModal({ visible, onClose, onSelectDate, title = 'Pick 
             >
               {/* Header */}
               <View className="flex-row items-center mb-6">
-                <Calendar size={24} color="#3B82F6" strokeWidth={2} />
+                <Calendar size={24} color={colors.primary} strokeWidth={2} />
                 <Text className="text-xl font-bold text-gray-900 dark:text-white ml-3">
                   {title}
                 </Text>
@@ -117,7 +118,7 @@ export function DatePickerModal({ visible, onClose, onSelectDate, title = 'Pick 
 
                 <Pressable
                   onPress={handleConfirm}
-                  className="flex-1 bg-blue-600 py-3 rounded-lg active:opacity-70"
+                  className="flex-1 bg-primary py-3 rounded-lg active:opacity-70"
                 >
                   <Text className="text-center font-semibold text-white">
                     Confirm

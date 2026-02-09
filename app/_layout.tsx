@@ -16,6 +16,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 // Local imports
+import { colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { NotificationSettingsProvider } from '@/lib/contexts/NotificationSettingsContext';
 import { useAuth } from '@/lib/hooks/use-auth';
@@ -178,7 +179,7 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) {
     return (
       <View style={styles.fontLoadingContainer}>
-        <ActivityIndicator size="large" color="#0080F0" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
