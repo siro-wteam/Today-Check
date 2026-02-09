@@ -25,7 +25,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/icon.png"
     },
     "plugins": [
       "expo-router",
@@ -47,6 +47,13 @@
           "dark": {
             "backgroundColor": "#111827"
           }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TodayCheck uses your photo library to set group images and profile pictures.",
+          "cameraPermission": "TodayCheck uses the camera to take photos for group images and profile pictures."
         }
       ]
     ],

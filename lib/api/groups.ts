@@ -508,9 +508,86 @@ export async function kickMember(
       return { success: false, error: new Error(deleteError.message) };
     }
 
+    // Add to blocked list so they cannot re-join with same invite code
+    const { error: blockError } = await supabase
+      .from('group_blocked_users')
+      .upsert({ group_id: groupId, user_id: targetUserId }, { onConflict: 'group_id,user_id' });
+
+    if (blockError) {
+      console.warn('Failed to add kicked user to block list (member was still removed):', blockError);
+    }
+
     return { success: true, error: null };
   } catch (err: any) {
     console.error('Exception kicking member:', err);
+    return { success: false, error: err };
+  }
+}
+
+/** Blocked member (kicked, cannot re-join until unblocked) */
+export interface BlockedMember {
+  id: string;
+  name: string;
+  blockedAt: string;
+}
+
+/**
+ * Get list of blocked users for a group (OWNER only). Used to show "Blocked members" and allow unblock.
+ */
+export async function getBlockedMembers(groupId: string): Promise<{ data: BlockedMember[] | null; error: Error | null }> {
+  try {
+    const { data: rows, error } = await supabase
+      .from('group_blocked_users')
+      .select('user_id, blocked_at')
+      .eq('group_id', groupId);
+
+    if (error) {
+      console.error('Error fetching blocked members:', error);
+      return { data: null, error: new Error(error.message) };
+    }
+
+    if (!rows || rows.length === 0) {
+      return { data: [], error: null };
+    }
+
+    const userIds = rows.map((r) => r.user_id);
+    const profilesMap = await fetchProfiles(userIds);
+    const blocked: BlockedMember[] = rows.map((r) => {
+      const profile = profilesMap.get(r.user_id);
+      return {
+        id: r.user_id,
+        name: profile?.nickname || `User ${r.user_id.slice(0, 8)}`,
+        blockedAt: r.blocked_at,
+      };
+    });
+    return { data: blocked, error: null };
+  } catch (err: any) {
+    console.error('Exception fetching blocked members:', err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Unblock a user so they can re-join the group with the invite code (OWNER only).
+ */
+export async function unblockMember(
+  groupId: string,
+  userId: string
+): Promise<{ success: boolean; error: Error | null }> {
+  try {
+    const { error } = await supabase
+      .from('group_blocked_users')
+      .delete()
+      .eq('group_id', groupId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error unblocking member:', error);
+      return { success: false, error: new Error(error.message) };
+    }
+    return { success: true, error: null };
+  } catch (err: any) {
+    console.error('Exception unblocking member:', err);
     return { success: false, error: err };
   }
 }

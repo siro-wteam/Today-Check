@@ -1,8 +1,18 @@
 import { ModalCloseButton } from '@/components/ModalCloseButton';
 import { borderRadius, colors, spacing } from '@/constants/colors';
+import { PRIVACY_POLICY_LAST_UPDATED, PRIVACY_POLICY_SECTIONS } from '@/constants/privacy-policy';
 import { Info, Shield } from 'lucide-react-native';
 import { Linking, Modal, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCallback, useState } from 'react';
+
+// Optional: set EXPO_PUBLIC_PRIVACY_POLICY_URL to your deployed web URL + '/privacy' (e.g. https://todaycheck.app/privacy)
+const PRIVACY_POLICY_URL =
+  typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_PRIVACY_POLICY_URL
+    ? process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL
+    : typeof window !== 'undefined'
+      ? `${(window as any).location?.origin || ''}/privacy`
+      : '';
 
 interface AboutModalProps {
   visible: boolean;
@@ -11,17 +21,24 @@ interface AboutModalProps {
 
 export function AboutModal({ visible, onClose }: AboutModalProps) {
   const insets = useSafeAreaInsets();
+  const [showPrivacyInApp, setShowPrivacyInApp] = useState(false);
 
-  const handlePrivacyPolicyPress = () => {
-    Linking.openURL('https://example.com/privacy-policy');
-  };
+  const handlePrivacyPolicyPress = useCallback(() => {
+    if (PRIVACY_POLICY_URL) {
+      Linking.openURL(PRIVACY_POLICY_URL);
+    } else {
+      setShowPrivacyInApp(true);
+    }
+  }, []);
+
+  const handleBackFromPrivacy = useCallback(() => setShowPrivacyInApp(false), []);
 
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={showPrivacyInApp ? handleBackFromPrivacy : onClose}
     >
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
         {/* Header */}
@@ -34,21 +51,50 @@ export function AboutModal({ visible, onClose }: AboutModalProps) {
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
         }}>
-          <View style={{ flex: 1 }} />
-          <Text style={{
-            fontSize: 18,
-            fontWeight: '600',
-            color: colors.textMain,
-            textAlign: 'center',
-          }}>
-            About
-          </Text>
-          <View style={{ flex: 1, alignItems: 'flex-end' }}>
-            <ModalCloseButton onPress={onClose} />
-          </View>
+          {showPrivacyInApp ? (
+            <>
+              <Pressable onPress={handleBackFromPrivacy} hitSlop={12}>
+                <Text style={{ fontSize: 16, color: colors.primary, fontWeight: '500' }}>Back</Text>
+              </Pressable>
+              <Text style={{ fontSize: 18, fontWeight: '600', color: colors.textMain }}>Privacy Policy</Text>
+              <View style={{ width: 48 }} />
+            </>
+          ) : (
+            <>
+              <View style={{ flex: 1 }} />
+              <Text style={{
+                fontSize: 18,
+                fontWeight: '600',
+                color: colors.textMain,
+                textAlign: 'center',
+              }}>
+                About
+              </Text>
+              <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                <ModalCloseButton onPress={onClose} />
+              </View>
+            </>
+          )}
         </View>
 
-        {/* Content */}
+        {showPrivacyInApp ? (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl * 2 }}>
+            <Text style={{ fontSize: 14, color: colors.textSub, marginBottom: spacing.xl }}>
+              Last updated: {PRIVACY_POLICY_LAST_UPDATED}
+            </Text>
+            {PRIVACY_POLICY_SECTIONS.map((section, index) => (
+              <View key={index} style={{ marginBottom: spacing.xl }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: colors.textMain, marginBottom: 8 }}>
+                  {section.title}
+                </Text>
+                <Text style={{ fontSize: 14, color: colors.textSub, lineHeight: 22 }}>
+                  {section.body}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        ) : (
+        /* Content */
         <ScrollView style={{ flex: 1, padding: spacing.lg }}>
           {/* App Logo and Version */}
           <View style={{
@@ -192,8 +238,10 @@ export function AboutModal({ visible, onClose }: AboutModalProps) {
             </View>
           </View>
         </ScrollView>
+        )}
 
-        {/* Footer */}
+        {/* Footer - only when showing About content */}
+        {!showPrivacyInApp && (
         <View style={{
           paddingHorizontal: spacing.lg,
           paddingVertical: spacing.lg,
@@ -229,6 +277,7 @@ export function AboutModal({ visible, onClose }: AboutModalProps) {
             </View>
           </View>
         </View>
+        )}
       </SafeAreaView>
     </Modal>
   );

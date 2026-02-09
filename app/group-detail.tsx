@@ -26,7 +26,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { uploadGroupImage } from '@/lib/api/groups';
+import { uploadGroupImage, getBlockedMembers, unblockMember, type BlockedMember } from '@/lib/api/groups';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DRAG_THRESHOLD = 100; // Minimum drag distance to dismiss
@@ -62,6 +62,8 @@ export default function GroupDetailScreen() {
   const [isSavingGroupName, setIsSavingGroupName] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageTimestamp, setImageTimestamp] = useState(Date.now());
+  const [blockedMembers, setBlockedMembers] = useState<BlockedMember[]>([]);
+  const [loadingBlocked, setLoadingBlocked] = useState(false);
   
   // Prevent multiple rapid button presses
   const isActioningRef = useRef(false);
@@ -200,6 +202,23 @@ export default function GroupDetailScreen() {
     };
   }, [params.groupId, user?.id, router]);
 
+  // Fetch blocked members when owner views group (for "Blocked members" section)
+  useEffect(() => {
+    if (!group?.id || !isOwner) {
+      setBlockedMembers([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingBlocked(true);
+    getBlockedMembers(group.id).then(({ data, error }) => {
+      if (cancelled) return;
+      setLoadingBlocked(false);
+      if (error) return;
+      setBlockedMembers(data ?? []);
+    });
+    return () => { cancelled = true; };
+  }, [group?.id, isOwner]);
+
   // Pull-to-Refresh handler
   const onRefresh = useCallback(async () => {
     if (!params.groupId) return;
@@ -207,6 +226,8 @@ export default function GroupDetailScreen() {
     setRefreshing(true);
     try {
       await fetchGroupById(params.groupId, user?.id);
+      const { data } = await getBlockedMembers(params.groupId);
+      setBlockedMembers(data ?? []);
     } finally {
       setRefreshing(false);
     }
@@ -502,6 +523,10 @@ export default function GroupDetailScreen() {
       try {
         const { success, error } = await kickMember(group.id, targetUserId);
         if (success) {
+          setBlockedMembers((prev) => [
+            ...prev,
+            { id: targetUserId, name: targetMember.name, blockedAt: new Date().toISOString() },
+          ]);
           await fetchGroupById(group.id, user.id);
         } else {
           showToast('error', 'Error', error || 'Failed to kick member');
@@ -525,6 +550,10 @@ export default function GroupDetailScreen() {
               await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               const { success, error } = await kickMember(group.id, targetUserId);
               if (success) {
+                setBlockedMembers((prev) => [
+                  ...prev,
+                  { id: targetUserId, name: targetMember.name, blockedAt: new Date().toISOString() },
+                ]);
                 await fetchGroupById(group.id, user.id);
               } else {
                 showToast('error', 'Error', error || 'Failed to kick member');
@@ -1134,6 +1163,60 @@ export default function GroupDetailScreen() {
             ))}
           </View>
         </View>
+
+        {/* Blocked members (owner only): kicked users cannot re-join until unblocked */}
+        {isOwner && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Blocked members</Text>
+              {blockedMembers.length > 0 && (
+                <View style={styles.memberCountBadge}>
+                  <Text style={[styles.memberCountText, { marginLeft: 0 }]}>{blockedMembers.length}</Text>
+                </View>
+              )}
+            </View>
+            {loadingBlocked ? (
+              <Text style={[styles.memberName, { color: colors.textSub, fontSize: 14 }]}>Loading...</Text>
+            ) : blockedMembers.length === 0 ? (
+              <Text style={[styles.memberName, { color: colors.textSub, fontSize: 14 }]}>
+                No blocked members. Kicked members are blocked from re-joining until you unblock them here.
+              </Text>
+            ) : (
+              <View style={styles.membersList}>
+                {blockedMembers.map((blocked) => (
+                  <View key={blocked.id} style={[styles.memberItem, { marginBottom: 8 }]}>
+                    <View style={[styles.memberAvatar, { backgroundColor: colors.gray300 }]}>
+                      <Text style={styles.memberAvatarText}>{blocked.name.charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <View style={[styles.memberInfo, { flex: 1 }]}>
+                      <Text style={styles.memberName}>{blocked.name}</Text>
+                      <Text style={[styles.memberName, { color: colors.textSub, fontSize: 12, fontWeight: '400' }]}>
+                        Blocked from re-joining
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={async () => {
+                        if (isActioningRef.current) return;
+                        isActioningRef.current = true;
+                        const { success, error } = await unblockMember(group.id, blocked.id);
+                        if (success) {
+                          setBlockedMembers((prev) => prev.filter((b) => b.id !== blocked.id));
+                          showToast('success', 'Unblocked', `${blocked.name} can re-join with the invite code.`);
+                        } else {
+                          showToast('error', 'Error', error?.message ?? 'Failed to unblock');
+                        }
+                        isActioningRef.current = false;
+                      }}
+                      style={[styles.memberActionButton, { paddingHorizontal: 12, paddingVertical: 8 }]}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: colors.primary }}>Unblock</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Action Buttons */}
         <View style={styles.actions}>
