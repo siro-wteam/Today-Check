@@ -10,7 +10,8 @@
     "ios:device": "./scripts/run-ios-device.sh",
     "web": "expo start --web",
     "lint": "expo lint",
-    "build": "npx expo export -p web"
+    "build": "npx expo export -p web",
+    "postinstall": "node scripts/patch-expo-ios-device.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

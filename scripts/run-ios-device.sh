@@ -2,6 +2,9 @@
 
 # iOS 기기에서 앱 실행 스크립트 (IP 자동 감지 + Metro bundler 자동 시작)
 # 사용법: ./scripts/run-ios-device.sh
+#
+# 첫 설치 후 앱이 실행되지 않으면: iPhone 설정 → 일반 → VPN 및 기기 관리
+# → 개발자 앱에서 본인 Apple ID 선택 → "신뢰" 탭
 
 # 🔧 스크립트가 있는 위치에서 프로젝트 루트로 이동
 cd "$(dirname "$0")/.."
