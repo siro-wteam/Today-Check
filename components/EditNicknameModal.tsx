@@ -10,6 +10,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { showToast } from '@/utils/toast';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, borderRadius, shadows } from '@/constants/colors';
 import { ModalCloseButton } from './ModalCloseButton';
 
@@ -26,6 +27,7 @@ export function EditNicknameModal({
   onClose,
   onSave,
 }: EditNicknameModalProps) {
+  const insets = useSafeAreaInsets();
   const [nickname, setNickname] = useState(currentNickname);
   const [loading, setLoading] = useState(false);
 
@@ -83,7 +85,7 @@ export function EditNicknameModal({
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <Pressable onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalContent}>
+            <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 24) }]}>
               {/* Header */}
               <View style={styles.header}>
                 <Text style={styles.headerTitle}>Edit Nickname</Text>
@@ -154,7 +156,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: borderRadius.xl,
     paddingHorizontal: 24,
     paddingTop: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
     ...shadows.lg,
   },
   header: {

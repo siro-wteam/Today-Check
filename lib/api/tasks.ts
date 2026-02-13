@@ -1111,6 +1111,99 @@ export async function hardDeleteTask(taskId: string) {
 }
 
 /**
+ * Duplicate tasks in the given week to the next week (same weekday).
+ * Only tasks whose due_date is in [currentWeekStart, currentWeekEnd] (이번주 시작 ~ 이번주 끝).
+ * 연기된 일정(rollover)은 due_date가 이번주 시작 전이므로 자동 제외됨.
+ */
+export async function duplicateTasksToNextWeek(
+  currentWeekStart: Date,
+  currentWeekEnd: Date
+): Promise<{ data: { copied: number }; error: any }> {
+  const startStr = format(currentWeekStart, 'yyyy-MM-dd');
+  const endStr = format(currentWeekEnd, 'yyyy-MM-dd');
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { data: null, error: new Error('User not authenticated') };
+  }
+
+  const { data: tasks, error: fetchError } = await supabase
+    .from('tasks')
+    .select(`
+      id,
+      title,
+      group_id,
+      due_date,
+      due_time,
+      creator_id,
+      task_assignees (
+        user_id,
+        is_completed
+      )
+    `)
+    .gte('due_date', startStr)
+    .lte('due_date', endStr)
+    .not('due_date', 'is', null)
+    .is('deleted_at', null)
+    .order('due_date', { ascending: true })
+    .order('due_time', { ascending: true, nullsFirst: false });
+
+  if (fetchError) {
+    console.error('[duplicateTasksToNextWeek] Fetch error:', fetchError);
+    return { data: null, error: fetchError };
+  }
+
+  if (!tasks || tasks.length === 0) {
+    return { data: { copied: 0 }, error: null };
+  }
+
+  const newRows = tasks.map((t: any) => {
+    const dueDate = t.due_date ? format(addDays(parseISO(t.due_date), 7), 'yyyy-MM-dd') : null;
+    const originalDueDate = dueDate;
+    return {
+      title: t.title,
+      creator_id: user.id,
+      group_id: t.group_id ?? null,
+      status: 'TODO',
+      due_date: dueDate,
+      due_time: t.due_time ?? null,
+      original_due_date: originalDueDate,
+    };
+  });
+
+  const { data: inserted, error: insertError } = await supabase
+    .from('tasks')
+    .insert(newRows)
+    .select('id');
+
+  if (insertError) {
+    console.error('[duplicateTasksToNextWeek] Insert error:', insertError);
+    return { data: null, error: insertError };
+  }
+
+  const insertedList = (inserted || []) as { id: string }[];
+  const assigneesByIndex = tasks.map((t: any) => (t.task_assignees || []).map((a: any) => ({ user_id: a.user_id, is_completed: false })));
+
+  for (let i = 0; i < insertedList.length; i++) {
+    const newTaskId = insertedList[i].id;
+    const assignees = assigneesByIndex[i];
+    if (assignees && assignees.length > 0) {
+      const assigneeRows = assignees.map((a: { user_id: string; is_completed: boolean }) => ({
+        task_id: newTaskId,
+        user_id: a.user_id,
+        is_completed: false,
+      }));
+      const { error: assigneeErr } = await supabase.from('task_assignees').insert(assigneeRows);
+      if (assigneeErr) {
+        console.error('[duplicateTasksToNextWeek] Assignee insert error for task', newTaskId, assigneeErr);
+      }
+    }
+  }
+
+  return { data: { copied: insertedList.length }, error: null };
+}
+
+/**
  * Toggle task status between TODO and DONE
  */
 export async function toggleTaskStatus(taskId: string, currentStatus: string) {

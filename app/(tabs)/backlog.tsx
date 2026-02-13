@@ -506,14 +506,14 @@ function BacklogItem({
                   disabled={isCheckboxDisabled}
                   style={[
                     {
-                      width: 24,
-                      height: 24,
+                      width: 18,
+                      height: 18,
                       borderRadius: borderRadius.full,
                       borderWidth: 2,
                       flexShrink: 0,
                       alignItems: 'center',
                       justifyContent: 'center',
-                      marginTop: 2, // Align with text baseline
+                      marginTop: 0,
                     },
                     isDone && {
                       backgroundColor: colors.success,
@@ -535,7 +535,7 @@ function BacklogItem({
                   pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
                 >
                   {isDone && (
-                    <Check size={14} color="#FFFFFF" strokeWidth={3} />
+                    <Check size={10} color="#FFFFFF" strokeWidth={3} />
                   )}
                   {isCancelled && (
                     <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>✕</Text>

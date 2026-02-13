@@ -90,7 +90,10 @@ export function groupTasksByDate(
         return a.due_time.localeCompare(b.due_time);
       }
       
-      // Finally by created_at
+      // Finally by created_at (handle undefined)
+      if (!a.created_at && !b.created_at) return 0;
+      if (!a.created_at) return 1;
+      if (!b.created_at) return -1;
       return a.created_at.localeCompare(b.created_at);
     });
   }

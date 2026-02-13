@@ -4,9 +4,9 @@
  */
 
 export const colors = {
-  // Primary - V0 진한 블루 (Tailwind blue-600)
-  primary: '#2563eb',
-  primaryDark: '#1d4ed8', // blue-700, active/pressed
+  // Primary - V0 primary blue: oklch(0.55 0.2 250) ≈ #3b82f6 (Tailwind blue-500)
+  primary: '#3b82f6',
+  primaryDark: '#2563eb', // blue-600, active/pressed
   primaryForeground: '#FFFFFF', // primary-foreground
   
   // Backgrounds - 참고 소스 :root

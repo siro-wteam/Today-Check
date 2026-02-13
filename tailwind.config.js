@@ -10,9 +10,9 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // v0 참고 소스 primary blue (진한 블루, blue-600)
-        primary: '#2563eb',
-        'primary-dark': '#1d4ed8',
+        // v0 primary blue: oklch(0.55 0.2 250) ≈ #3b82f6 (blue-500)
+        primary: '#3b82f6',
+        'primary-dark': '#2563eb',
         'primary-foreground': '#ffffff',
         background: '#F8FAFC',    // oklch(0.98 0.005 250)
         foreground: '#1e293b',    // oklch(0.2 0.02 260)

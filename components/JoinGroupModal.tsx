@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { showToast } from '@/utils/toast';
 import { UserPlus } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, borderRadius, shadows } from '@/constants/colors';
 import { ModalCloseButton } from './ModalCloseButton';
 
@@ -21,6 +22,7 @@ interface JoinGroupModalProps {
 }
 
 export function JoinGroupModal({ visible, onClose, onJoin }: JoinGroupModalProps) {
+  const insets = useSafeAreaInsets();
   const [inviteCode, setInviteCode] = useState('');
 
   const handleJoin = () => {
@@ -61,7 +63,7 @@ export function JoinGroupModal({ visible, onClose, onJoin }: JoinGroupModalProps
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <Pressable onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalContent}>
+            <View style={[styles.modalContent, { paddingBottom: Math.max(insets.bottom, 24) }]}>
               {/* Header */}
               <View style={styles.header}>
                 <Text style={styles.headerTitle}>Join Group</Text>
@@ -133,7 +135,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: borderRadius.xl,
     paddingHorizontal: 24,
     paddingTop: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
     ...shadows.lg,
   },
   header: {

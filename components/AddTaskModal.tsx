@@ -20,6 +20,7 @@ import {
 import { showToast } from '@/utils/toast';
 import { ModalCloseButton } from './ModalCloseButton';
 import * as Haptics from 'expo-haptics';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface AddTaskModalProps {
   visible: boolean;
@@ -28,6 +29,7 @@ interface AddTaskModalProps {
 }
 
 export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProps) {
+  const insets = useSafeAreaInsets();
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [dueTime, setDueTime] = useState<Date | null>(null);
@@ -292,7 +294,10 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <Pressable onPress={(e) => e.stopPropagation()}>
-            <View className="bg-white dark:bg-gray-900 rounded-t-3xl px-6 py-6">
+            <View 
+              className="bg-white dark:bg-gray-900 rounded-t-3xl px-6 py-6"
+              style={{ paddingBottom: Math.max(insets.bottom, 24) }}
+            >
               {/* Header */}
               <View className="flex-row justify-between items-center mb-6">
                 <Text className="text-xl font-bold text-gray-900 dark:text-white">

@@ -5,9 +5,17 @@ import { Archive, Home, Plus, User, Users } from 'lucide-react-native';
 import { Tabs } from 'expo-router';
 import { useState } from 'react';
 import { Platform, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const TAB_BAR_BASE_HEIGHT = Platform.OS === 'ios' ? 90 : 70;
+const TAB_BAR_BASE_PADDING_BOTTOM = Platform.OS === 'ios' ? 20 : 10;
 
 export default function TabLayout() {
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets.bottom;
+  const tabBarHeight = TAB_BAR_BASE_HEIGHT + bottomInset;
+  const tabBarPaddingBottom = TAB_BAR_BASE_PADDING_BOTTOM + bottomInset;
 
   return (
     <>
@@ -21,9 +29,9 @@ export default function TabLayout() {
             borderTopWidth: 1,
             borderTopColor: 'rgba(229, 231, 235, 0.5)', // border-border/50
             backgroundColor: '#FFFFFF', // Pure white background
-            paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+            paddingBottom: tabBarPaddingBottom,
             paddingTop: 10,
-            height: Platform.OS === 'ios' ? 90 : 70,
+            height: tabBarHeight,
             pointerEvents: 'auto',
           },
           tabBarLabelStyle: {

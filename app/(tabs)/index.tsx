@@ -17,9 +17,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Users } from 'lucide-react-native';
+import { duplicateTasksToNextWeek } from '@/lib/api/tasks';
+import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Repeat, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
+import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -58,6 +59,8 @@ export default function WeekScreen() {
     updateTask: updateTaskInStore,
     toggleTaskComplete: toggleTaskCompleteInStore,
     deleteTask: deleteTaskInStore,
+    mergeTasksIntoStore,
+    rollbackCopyWeek,
   } = useCalendarStore();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
@@ -80,7 +83,8 @@ export default function WeekScreen() {
   // Edit task modal state
   const [isEditTaskModalVisible, setIsEditTaskModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
-  
+  const [copyInProgress, setCopyInProgress] = useState(false);
+
   // Calculate this week's weekStartStr (constant)
   const THIS_WEEK_START_STR = useMemo(() => {
     const today = startOfDay(new Date());
@@ -354,7 +358,67 @@ export default function WeekScreen() {
       initializeCalendar();
     }, [initializeCalendar])
   );
-  
+
+  // Copy visible week to next week (이번주 또는 미래주에서 해당 주 → 다음 주로 복사)
+  const handleCopyWeekToNext = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+    Alert.alert(
+      'Copy to next week',
+      "Copy this week's schedule to the same weekdays next week. Continue?",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'OK',
+          onPress: async () => {
+            setCopyInProgress(true);
+            const weekStart = parseISO(currentWeekStartStr);
+            const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+            const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
+
+            const sourceWeekTasks = tasks.filter(
+              t => t.due_date && t.due_date >= currentWeekStartStr && t.due_date <= weekEndStr
+            );
+
+            const now = new Date().toISOString();
+            const nextWeekDate = (d: string) => format(addWeeks(parseISO(d), 1), 'yyyy-MM-dd');
+            const optimisticTasks = sourceWeekTasks.map((t, i) => {
+              const { isOverdue, daysOverdue, ...rest } = t as any;
+              return {
+                ...rest,
+                id: `opt-copy-${Date.now()}-${i}`,
+                due_date: nextWeekDate(t.due_date!),
+                original_due_date: nextWeekDate(t.due_date!),
+                status: 'TODO' as const,
+                completed_at: null,
+                created_at: now,
+                updated_at: now,
+                assignees: (t.assignees ?? []).map((a: any) => ({ ...a, is_completed: false, completed_at: null })),
+              };
+            });
+
+            if (optimisticTasks.length > 0) {
+              mergeTasksIntoStore(optimisticTasks);
+            }
+
+            const { data, error } = await duplicateTasksToNextWeek(weekStart, weekEnd);
+            setCopyInProgress(false);
+
+            if (error) {
+              if (optimisticTasks.length > 0) rollbackCopyWeek();
+              showToast('error', 'Copy failed', error?.message ?? 'Something went wrong.');
+              return;
+            }
+            showToast('success', 'Done', 'Copy completed.');
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+            initializeCalendar();
+          },
+        },
+      ]
+    );
+  }, [currentWeekStartStr, tasks, mergeTasksIntoStore, rollbackCopyWeek, queryClient, initializeCalendar]);
+
   // Handle quick add task
   const handleQuickAdd = (dateStr: string) => {
     if (Platform.OS === 'ios') {
@@ -398,17 +462,26 @@ export default function WeekScreen() {
   
   // Calculate progress
   const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+  // 항상 "오늘(이번 주 오늘)" 데이터 — 지난주/미래주 카드의 오른쪽 Today's Progress용
+  const thisWeekPage = weekPages.find(p => p.weekStartStr === THIS_WEEK_START_STR);
+  const todayGroupFromThisWeek = thisWeekPage?.dailyGroups.find(g => g.date === todayStr);
+  const todayTasksFromThisWeek = todayGroupFromThisWeek?.tasks || [];
+  const todayCompleted = todayTasksFromThisWeek.filter(t => t.status === 'DONE').length;
+  const todayTotal = todayTasksFromThisWeek.length;
+
   let progressTitle = '';
   let progressText = '';
   let progressPercent = 0;
   let totalTasks = 0;
   let completedTasks = 0;
-  
+  let weekLeftTitle = '';
+  let weekLeftValue = '';
+  let weekRightTitle = '';
+  let weekRightValue = '';
+
   if (isCurrentWeek) {
-    const todayGroup = currentWeekPage?.dailyGroups.find(g => g.date === todayStr);
-    const todayTasks = todayGroup?.tasks || [];
-    completedTasks = todayTasks.filter(t => t.status === 'DONE').length;
-    totalTasks = todayTasks.length;
+    completedTasks = todayCompleted;
+    totalTasks = todayTotal;
     progressTitle = "Today's Progress";
     progressText = `${completedTasks}/${totalTasks} Completed`;
     progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
@@ -416,15 +489,19 @@ export default function WeekScreen() {
     const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
     completedTasks = allWeekTasks.filter(t => t.status === 'DONE').length;
     totalTasks = allWeekTasks.length;
-    progressTitle = "Week Progress";
-    progressText = `${completedTasks} completed`;
-    progressPercent = 0; // Don't show percentage for past weeks
+    weekLeftTitle = 'Week completed';
+    weekLeftValue = `${completedTasks} completed`;
+    weekRightTitle = "Today's Progress";
+    weekRightValue = `${todayCompleted}/${todayTotal} completed`;
+    progressPercent = 0;
   } else if (isFutureWeek) {
     const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
     totalTasks = allWeekTasks.length;
-    progressTitle = "Week Preview";
-    progressText = `${totalTasks} scheduled`;
-    progressPercent = 0; // Don't show percentage for future weeks
+    weekLeftTitle = 'Week scheduled';
+    weekLeftValue = `${totalTasks} scheduled`;
+    weekRightTitle = "Today's Progress";
+    weekRightValue = `${todayCompleted}/${todayTotal} completed`;
+    progressPercent = 0;
   }
   
   return (
@@ -437,7 +514,7 @@ export default function WeekScreen() {
         onClose={() => setIsNotificationModalVisible(false)}
       />
       
-      {/* Week Progress Card - 상단 영역 축소, % 동그라미·숫자 확대 */}
+      {/* Week Progress Card - 이번주: Today+%+바 / 지난주·미래주: 왼쪽 Week completed|scheduled, 오른쪽 Today's Progress */}
       <View 
         style={[
           {
@@ -448,56 +525,83 @@ export default function WeekScreen() {
             paddingHorizontal: 16,
             paddingVertical: 12,
             borderRadius: borderRadius.xl,
+            minHeight: 104,
             ...shadows.sm,
           },
           Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center', marginHorizontal: 'auto' as any },
         ]}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
-              {progressTitle}
-            </Text>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
-              {progressText}
-            </Text>
-          </View>
-          {/* Only show percentage for current week - V0 스타일: 동그라미 안에 % (크게) */}
-          {isCurrentWeek && (
-            <View 
+        {isCurrentWeek ? (
+          <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 64 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
+                  {progressTitle}
+                </Text>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
+                  {progressText}
+                </Text>
+              </View>
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground }}>
+                  {progressPercent}%
+                </Text>
+              </View>
+            </View>
+            <View
               style={{
-                width: 64,
-                height: 64,
-                borderRadius: 32,
-                backgroundColor: 'rgba(255, 255, 255, 0.25)',
-                alignItems: 'center',
-                justifyContent: 'center',
+                height: 6,
+                marginTop: 10,
+                borderRadius: borderRadius.full,
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                overflow: 'hidden',
               }}
             >
-              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground }}>
-                {progressPercent}%
+              <View
+                style={{
+                  height: '100%',
+                  width: `${progressPercent}%`,
+                  backgroundColor: colors.primaryForeground,
+                  borderRadius: borderRadius.full,
+                }}
+              />
+            </View>
+          </>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'stretch', minHeight: 64 }}>
+            <View style={{ flex: 1, justifyContent: 'center' }}>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
+                {weekLeftTitle}
+              </Text>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
+                {weekLeftValue}
               </Text>
             </View>
-          )}
-        </View>
-        {totalTasks > 0 && (
-          <View 
-            style={{
-              height: 6,
-              marginTop: 10,
-              borderRadius: borderRadius.full,
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              overflow: 'hidden',
-            }}
-          >
-            <View 
+            <View
               style={{
-                height: '100%',
-                width: `${progressPercent}%`,
-                backgroundColor: colors.primaryForeground,
-                borderRadius: borderRadius.full,
+                width: 1,
+                backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                marginVertical: 4,
+                marginHorizontal: 16,
               }}
             />
+            <View style={{ flex: 1, justifyContent: 'center' }}>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
+                {weekRightTitle}
+              </Text>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
+                {weekRightValue}
+              </Text>
+            </View>
           </View>
         )}
       </View>
@@ -515,20 +619,17 @@ export default function WeekScreen() {
           Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' },
         ]}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Pressable onPress={goToPreviousWeek} disabled={isLoading}>
-            <ChevronLeft size={24} color={colors.textSub} strokeWidth={2} />
-          </Pressable>
-          
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8 }}>
-            <Text style={{ fontSize: 18, fontWeight: '600', color: colors.textMain }}>
-              {currentWeekDisplay}
-            </Text>
-            {/* Show "Go to Today" button for past/future weeks */}
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ flex: 1 }} />
+          <Text style={{ fontSize: 18, fontWeight: '600', color: colors.textMain }}>
+            {currentWeekDisplay}
+          </Text>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
             {!isCurrentWeek && (
               <Pressable
                 onPress={goToThisWeek}
                 disabled={isLoading}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 style={{
                   backgroundColor: colors.primary,
                   paddingHorizontal: 10,
@@ -536,16 +637,27 @@ export default function WeekScreen() {
                   borderRadius: borderRadius.md,
                 }}
               >
-                <Text style={{ fontSize: 12, fontWeight: '600', color: colors.primaryForeground }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: colors.primaryForeground }}>
                   Today
                 </Text>
               </Pressable>
             )}
+            {(isCurrentWeek || isFutureWeek) && (
+              <Pressable
+                onPress={handleCopyWeekToNext}
+                disabled={copyInProgress || isLoading}
+                hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                style={{
+                  backgroundColor: colors.primary,
+                  padding: 6,
+                  borderRadius: borderRadius.md,
+                  opacity: copyInProgress ? 0.6 : 1,
+                }}
+              >
+                <Repeat size={20} color={colors.primaryForeground} strokeWidth={2} />
+              </Pressable>
+            )}
           </View>
-          
-          <Pressable onPress={goToNextWeek} disabled={isLoading}>
-            <ChevronRight size={24} color={colors.textSub} strokeWidth={2} />
-          </Pressable>
         </View>
       </View>
       
@@ -1144,118 +1256,121 @@ const DailyCard = React.memo(function DailyCard({
                   ]}
                 >
                   <View style={{ paddingHorizontal: 12, paddingVertical: 12 }}>
-                    {/* First line: Checkbox + Title + Time + Delay */}
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+                    {/* First line: Checkbox + Title + Delay Badge */}
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                       <Pressable
                         onPress={() => handleToggleComplete(task)}
                         style={[
                           {
-                            width: 24,
-                            height: 24,
+                            width: 18,
+                            height: 18,
                             borderRadius: borderRadius.full,
                             borderWidth: 2,
                             flexShrink: 0,
                             alignItems: 'center',
                             justifyContent: 'center',
-                            marginTop: 2,
+                            marginTop: 0,
                           },
                           isDone && { backgroundColor: colors.success, borderColor: colors.success },
                           isCancelled && { backgroundColor: colors.gray300, borderColor: colors.gray300 },
                           !isDone && !isCancelled && { borderColor: 'rgba(156, 163, 175, 0.3)' },
                         ]}
                       >
-                        {isDone && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
-                        {isCancelled && <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>✕</Text>}
+                        {isDone && <Check size={10} color="#FFFFFF" strokeWidth={3} />}
+                        {isCancelled && <Text style={{ color: '#fff', fontSize: 9, fontWeight: '600' }}>✕</Text>}
                       </Pressable>
                       
-                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                        <Pressable
-                          onPress={() => {
-                            console.log('Task title pressed in week view:', task);
-                            // Use global handleTaskEdit function
-                            const globalHandler = (globalThis as any).handleTaskEdit;
-                            if (typeof globalHandler === 'function') {
-                              globalHandler(task);
-                            } else {
-                              console.error('Global handleTaskEdit not found');
-                            }
-                          }}
-                          style={{ flexShrink: 1, minWidth: 0 }}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
-                        >
-                          <Text 
-                            numberOfLines={2}
-                            ellipsizeMode="tail"
-                            style={[
-                              { fontSize: 14, fontWeight: '500', flexShrink: 1, minWidth: 0 },
-                              isDone && { color: colors.textSub, textDecorationLine: 'line-through' },
-                              isCancelled && { color: colors.textDisabled, textDecorationLine: 'line-through' },
-                              !isDone && !isCancelled && { color: colors.textMain, fontWeight: '500' },
-                            ]}
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Pressable
+                            onPress={() => {
+                              console.log('Task title pressed in week view:', task);
+                              const globalHandler = (globalThis as any).handleTaskEdit;
+                              if (typeof globalHandler === 'function') {
+                                globalHandler(task);
+                              } else {
+                                console.error('Global handleTaskEdit not found');
+                              }
+                            }}
+                            style={{ flex: 1, minWidth: 0 }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
                           >
-                            {String(task.title || '(Untitled)')}
-                          </Text>
-                        </Pressable>
+                            <Text 
+                              numberOfLines={1}
+                              ellipsizeMode="tail"
+                              style={[
+                                { fontSize: 14, fontWeight: '500' },
+                                isDone && { color: colors.textSub, textDecorationLine: 'line-through' },
+                                isCancelled && { color: colors.textDisabled, textDecorationLine: 'line-through' },
+                                !isDone && !isCancelled && { color: colors.textMain },
+                              ]}
+                            >
+                              {String(task.title || '(Untitled)')}
+                            </Text>
+                          </Pressable>
+                          
+                          {((isOverdue && isTodo && task.daysOverdue && task.daysOverdue > 0) || (isDone && isLateCompletion > 0)) && (
+                            <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: borderRadius.full, flexShrink: 0 }}>
+                              <Text style={{ color: '#92400E', fontSize: 10, fontWeight: '600' }}>
+                                +{isDone ? isLateCompletion : task.daysOverdue}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                    
+                    {/* Second line: Badges (Assignees + Progress + Group + Time + Backlog) */}
+                    {!isDone && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8, marginLeft: 36 }}>
+                        {task.group_id && task.assignees && task.assignees.length > 0 && (
+                          <AssigneeAvatars
+                            taskId={task.id}
+                            groupId={task.group_id}
+                            assignees={task.assignees.map(a => ({
+                              user_id: a.user_id,
+                              nickname: a.profile?.nickname || 'Unknown',
+                              avatar_url: a.profile?.avatar_url || null,
+                              is_completed: a.is_completed,
+                              completed_at: a.completed_at,
+                            }))}
+                            size={20}
+                            showCompletionRate={false}
+                          />
+                        )}
+                        
+                        {task.group_id && (() => {
+                          const groupName = groupsMap.get(task.group_id)?.name;
+                          return groupName ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0, maxWidth: 100 }}>
+                              <Users size={10} color="#64748B" strokeWidth={2} />
+                              <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
+                                {String(groupName)}
+                              </Text>
+                            </View>
+                          ) : null;
+                        })()}
                         
                         {task.due_time && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6, flexShrink: 0 }}>
-                            <Clock size={10} color="#475569" strokeWidth={2} />
-                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#475569', marginLeft: 4 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
+                            <Clock size={10} color="#64748B" strokeWidth={2} />
+                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
                               {String(formatTime(task.due_time) || '')}
                             </Text>
                           </View>
                         )}
-                      </View>
-                      
-                      {((isOverdue && isTodo && task.daysOverdue && task.daysOverdue > 0) || (isDone && isLateCompletion > 0)) && (
-                        <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: borderRadius.sm, flexShrink: 0, marginTop: 2 }}>
-                          <Text style={{ color: colors.textMain, fontSize: 12, fontWeight: '500' }}>
-                            +{isDone ? isLateCompletion : task.daysOverdue}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    
-                    {/* Second line: Group + Assignees + Backlog */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginLeft: 36 }}>
-                      {task.group_id && (() => {
-                        const groupName = groupsMap.get(task.group_id)?.name;
-                        return groupName ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6, flexShrink: 0 }}>
-                            <Users size={10} color="#475569" strokeWidth={2} />
-                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#475569', marginLeft: 4, maxWidth: 100 }} numberOfLines={1} ellipsizeMode="tail">
-                              {String(groupName)}
+                        
+                        {!task.due_date && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
+                            <Package size={10} color="#64748B" strokeWidth={2} />
+                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
+                              Backlog
                             </Text>
                           </View>
-                        ) : null;
-                      })()}
-                      
-                      {task.group_id && task.assignees && task.assignees.length > 0 && (
-                        <AssigneeAvatars
-                          taskId={task.id}
-                          groupId={task.group_id}
-                          assignees={task.assignees.map(a => ({
-                            user_id: a.user_id,
-                            nickname: a.profile?.nickname || 'Unknown',
-                            avatar_url: a.profile?.avatar_url || null,
-                            is_completed: a.is_completed,
-                            completed_at: a.completed_at,
-                          }))}
-                          size={20}
-                          showCompletionRate={false}
-                        />
-                      )}
-                      
-                      {isDone && !task.due_date && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6, flexShrink: 0 }}>
-                          <Package size={10} color="#475569" strokeWidth={2} />
-                          <Text style={{ fontSize: 10, fontWeight: '500', color: '#475569', marginLeft: 4 }}>
-                            Backlog
-                          </Text>
-                        </View>
-                      )}
-                    </View>
+                        )}
+                      </View>
+                    )}
                   </View>
                 </View>
               );

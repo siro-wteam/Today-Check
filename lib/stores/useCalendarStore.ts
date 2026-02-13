@@ -50,6 +50,9 @@ interface CalendarState {
   // Public helpers (used by components for group task updates)
   mergeTasksIntoStore: (newTasks: Task[]) => void;
   getTaskById: (taskId: string) => Task | undefined;
+
+  // Rollback optimistic "copy week" tasks (removes tasks with id starting with opt-copy-)
+  rollbackCopyWeek: () => void;
 }
 
 export const useCalendarStore = create<CalendarState>((set, get) => ({
@@ -306,7 +309,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         showToast('error', '삭제 실패', result.error.message || '작업을 삭제할 수 없습니다.');
         return { success: false, error: result.error.message };
       }
-      
+
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
       showToast('success', '삭제 완료', '작업이 삭제되었습니다.');
       return { success: true };
     } catch (error: any) {
@@ -450,5 +454,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   getTaskById: (taskId: string) => {
     const state = get();
     return state.tasks.find(t => t.id === taskId) as TaskWithRollover | undefined;
+  },
+
+  /**
+   * Rollback optimistic copy-week: remove tasks whose id starts with 'opt-copy-'
+   */
+  rollbackCopyWeek: () => {
+    const state = get();
+    set({ tasks: state.tasks.filter(t => !t.id.startsWith('opt-copy-')) });
   },
 }));

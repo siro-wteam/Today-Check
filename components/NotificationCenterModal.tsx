@@ -27,6 +27,7 @@ import {
     Text,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ModalCloseButton } from './ModalCloseButton';
 
 interface NotificationCenterModalProps {
@@ -35,6 +36,7 @@ interface NotificationCenterModalProps {
 }
 
 export function NotificationCenterModal({ visible, onClose }: NotificationCenterModalProps) {
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -295,7 +297,7 @@ export function NotificationCenterModal({ visible, onClose }: NotificationCenter
                 borderTopRightRadius: borderRadius['2xl'],
                 maxHeight: isWeb ? '60vh' : '60%',
                 minHeight: 400,
-                paddingBottom: Platform.OS === 'ios' ? spacing.xl : spacing.lg,
+                paddingBottom: Math.max(insets.bottom, spacing.lg),
                 overflow: 'hidden',
               },
               isWeb && {

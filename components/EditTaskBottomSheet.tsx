@@ -1,5 +1,5 @@
 import { colors } from '@/constants/colors';
-import { deleteTask, getTaskById, moveTaskToBacklog, updateTask, updateTaskAssignees } from '@/lib/api/tasks';
+import { getTaskById, moveTaskToBacklog, updateTask, updateTaskAssignees } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { Package, Trash2, Users } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ModalCloseButton } from './ModalCloseButton';
 
 interface EditTaskBottomSheetProps {
@@ -23,9 +24,10 @@ interface EditTaskBottomSheetProps {
 }
 
 export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateChange }: EditTaskBottomSheetProps) {
+  const insets = useSafeAreaInsets();
   const { groups, fetchMyGroups } = useGroupStore();
   const { user } = useAuth();
-  const { updateTask: updateTaskInStore, mergeTasksIntoStore } = useCalendarStore();
+  const { updateTask: updateTaskInStore, mergeTasksIntoStore, deleteTask: deleteTaskInStore } = useCalendarStore();
   const queryClient = useQueryClient();
   
   // Form state
@@ -164,22 +166,10 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   };
 
   const performDelete = async () => {
-    try {
-      const { error } = await deleteTask(task.id);
-      
-      if (error) {
-        throw error;
-      }
-
-      // Success - close modal and trigger update
+    const result = await deleteTaskInStore(task.id);
+    if (result.success) {
       handleClose();
-      
-      // Delay onUpdate to ensure modal is closed first
-      setTimeout(() => {
-        onUpdate();
-      }, 200);
-    } catch (error: any) {
-      showToast('error', 'Delete Failed', error.message);
+      setTimeout(() => onUpdate(), 200);
     }
   };
 
@@ -390,7 +380,16 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
         );
       }
 
-      // Success - close modal
+      // Success - show toast and close modal
+      const wasBacklog = !task.due_date;
+      const nowScheduled = !!dueDateStr;
+      
+      if (wasBacklog && nowScheduled) {
+        showToast('success', 'Task Scheduled');
+      } else {
+        showToast('success', 'Task Updated');
+      }
+      
       handleClose();
       
       // onUpdate callback is optional (for backward compatibility)
@@ -522,7 +521,10 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <Pressable onPress={(e) => e.stopPropagation()}>
-            <View className="bg-white dark:bg-gray-900 rounded-t-3xl px-6 py-6">
+            <View 
+              className="bg-white dark:bg-gray-900 rounded-t-3xl px-6 py-6"
+              style={{ paddingBottom: Math.max(insets.bottom, 24) }}
+            >
               {/* Header */}
               <View className="flex-row justify-between items-center mb-6">
                 <Text className="text-xl font-bold text-gray-900 dark:text-white">
