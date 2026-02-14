@@ -5,7 +5,7 @@ import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isToday, isTomorrow, parse } from 'date-fns';
-import { Users } from 'lucide-react-native';
+import { Users, X } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
     KeyboardAvoidingView,
@@ -33,15 +33,24 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [dueTime, setDueTime] = useState<Date | null>(null);
+  const [dueTimeEnd, setDueTimeEnd] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  
+  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [timePickerValue, setTimePickerValue] = useState<Date | null>(null);
+  const [endTimePickerValue, setEndTimePickerValue] = useState<Date | null>(null);
+  const [webStartPickerValue, setWebStartPickerValue] = useState<Date | null>(null);
+  const [webEndPickerValue, setWebEndPickerValue] = useState<Date | null>(null);
+
   // Group task fields
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null); // null = personal task
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
 
   const dateInputRef = useRef<any>(null);
   const timeInputRef = useRef<any>(null);
+  const endTimeInputRef = useRef<any>(null);
+  const timeBeforeOpenRef = useRef<Date | null>(null);
+  const endTimeBeforeOpenRef = useRef<Date | null>(null);
 
   const { addTask } = useCalendarStore();
   const { groups, fetchMyGroups } = useGroupStore();
@@ -98,19 +107,26 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
     }
   }, [showDatePicker]);
 
-  // 웹에서 시간 선택기 자동 열기
+  // 웹에서는 커스텀 모달(Cancel/Apply) 사용 → showPicker 호출 안 함
   useEffect(() => {
-    if (Platform.OS === 'web' && showTimePicker && timeInputRef.current) {
-      setTimeout(() => {
-        timeInputRef.current?.showPicker?.();
-      }, 100);
+    if (Platform.OS === 'web') return;
+    if (showTimePicker && timeInputRef.current) {
+      setTimeout(() => timeInputRef.current?.showPicker?.(), 100);
     }
   }, [showTimePicker]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (showEndTimePicker && endTimeInputRef.current) {
+      setTimeout(() => endTimeInputRef.current?.showPicker?.(), 100);
+    }
+  }, [showEndTimePicker]);
 
   const resetForm = () => {
     setTitle('');
     setDueDate(null);
     setDueTime(null);
+    setDueTimeEnd(null);
     setSelectedGroupId(null);
     setSelectedAssigneeIds([]);
   };
@@ -151,6 +167,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
     // date-fns format으로 로컬 타임존 기준 문자열 생성
     const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
     const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
+    const dueTimeEndStr = dueTimeEnd ? format(dueTimeEnd, 'HH:mm:ss') : null;
 
     setIsCreating(true);
     
@@ -163,6 +180,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
           assignee_ids: selectedAssigneeIds, // Can be empty array
           due_date: dueDateStr,
           due_time: dueTimeStr,
+          due_time_end: dueTimeEndStr,
         });
 
         if (result.success) {
@@ -179,6 +197,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
           title: cleanedTitle,
           due_date: dueDateStr,
           due_time: dueTimeStr,
+          due_time_end: dueTimeEndStr,
         });
 
         if (result.success) {
@@ -506,26 +525,76 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                   >
                     {dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
                       ? format(dueDate, 'MMM d')
-                      : '📅 Pick Date'}
+                      : '📅 Date'}
                   </Text>
                 </Pressable>
               </View>
 
-              {/* Time Selection (only if date is selected) */}
+              {/* Time Selection: [아이콘+시작시간+제거] ~ [아이콘+종료시간+제거] */}
               {dueDate && (
-                <Pressable
-                  onPress={() => {
-                    if (Platform.OS === 'ios') {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                    }
-                    setShowTimePicker(true);
-                  }}
-                  className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 mb-4"
-                >
-                  <Text className="text-gray-700 dark:text-gray-300">
-                    {dueTime ? `⏰ ${format(dueTime, 'HH:mm')}` : '⏰ Pick Time (Optional)'}
-                  </Text>
-                </Pressable>
+                <View className="flex-row items-center flex-wrap gap-2 mb-4" style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {/* 그룹: 시작시간 */}
+                  <View className="flex-row items-center rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-2 pr-1 py-2" style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text className="text-gray-700 dark:text-gray-300 mr-1.5">🕐</Text>
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      timeBeforeOpenRef.current = dueTime ? new Date(dueTime.getTime()) : null;
+                        setTimePickerValue(dueTime ?? getDefaultTime());
+                        if (Platform.OS === 'web') setWebStartPickerValue(dueTime ?? getDefaultTime());
+                        setShowTimePicker(true);
+                      }}
+                    className="py-1 px-1 rounded min-w-[64px]"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-medium">
+                        {dueTime ? format(dueTime, 'HH:mm') : 'Start (Optional)'}
+                      </Text>
+                    </Pressable>
+                    {dueTime != null && (
+                      <Pressable
+                        onPress={() => {
+                          if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                          setDueTime(null);
+                        }}
+                        className="rounded-full p-1 ml-0.5 items-center justify-center bg-gray-200/40 dark:bg-gray-600/40 active:opacity-70"
+                        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                      >
+                        <X size={14} color="#64748B" strokeWidth={2.5} />
+                      </Pressable>
+                    )}
+                  </View>
+                  <Text className="text-gray-500 dark:text-gray-400 font-medium">~</Text>
+                  {/* 그룹: 종료시간 */}
+                  <View className="flex-row items-center rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-2 pr-1 py-2" style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text className="text-gray-700 dark:text-gray-300 mr-1.5">🕐</Text>
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      endTimeBeforeOpenRef.current = dueTimeEnd ? new Date(dueTimeEnd.getTime()) : null;
+                        setEndTimePickerValue(dueTimeEnd ?? dueTime ?? getDefaultTime());
+                        if (Platform.OS === 'web') setWebEndPickerValue(dueTimeEnd ?? dueTime ?? getDefaultTime());
+                        setShowEndTimePicker(true);
+                      }}
+                    className="py-1 px-1 rounded min-w-[64px]"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-medium">
+                        {dueTimeEnd ? format(dueTimeEnd, 'HH:mm') : 'End (Optional)'}
+                      </Text>
+                    </Pressable>
+                    {dueTimeEnd != null && (
+                      <Pressable
+                        onPress={() => {
+                          if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                          setDueTimeEnd(null);
+                        }}
+                        className="rounded-full p-1 ml-0.5 items-center justify-center bg-gray-200/40 dark:bg-gray-600/40 active:opacity-70"
+                        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                      >
+                        <X size={14} color="#64748B" strokeWidth={2.5} />
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
               )}
 
               {/* DateTimePicker - Native iOS (Calendar) */}
@@ -562,6 +631,8 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                         }
                         setDueDate(null);
+                        setDueTime(null);
+                        setDueTimeEnd(null);
                         setShowDatePicker(false);
                       }}
                       className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
@@ -589,12 +660,13 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                 <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-2 mb-4" style={{ maxHeight: 250 }}>
                   <View style={{ transform: [{ scale: 0.85 }], marginTop: -10, marginBottom: -10 }}>
                     <DateTimePicker
-                      value={dueTime || getDefaultTime()} // Default: current time + 1 hour, 00 min
+                      value={timePickerValue ?? getDefaultTime()}
                       mode="time"
                       display="spinner"
-                      minuteInterval={5} // 5-minute intervals
+                      minuteInterval={5}
                       onChange={(event, selectedTime) => {
                         if (selectedTime) {
+                          setTimePickerValue(selectedTime);
                           setDueTime(selectedTime);
                         }
                       }}
@@ -606,7 +678,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                         if (Platform.OS === 'ios') {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                         }
-                        setDueTime(null);
+                        setDueTime(timeBeforeOpenRef.current);
                         setShowTimePicker(false);
                       }}
                       className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
@@ -620,7 +692,55 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                         if (Platform.OS === 'ios') {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
                         }
+                        setDueTime(timePickerValue ?? getDefaultTime());
                         setShowTimePicker(false);
+                      }}
+                      className="flex-1 bg-primary rounded-xl py-3 items-center"
+                    >
+                      <Text className="text-white font-semibold">Apply</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {Platform.OS === 'ios' && showEndTimePicker && (
+                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-2 mb-4" style={{ maxHeight: 250 }}>
+                  <View style={{ transform: [{ scale: 0.85 }], marginTop: -10, marginBottom: -10 }}>
+                    <DateTimePicker
+                      value={endTimePickerValue ?? dueTime ?? getDefaultTime()}
+                      mode="time"
+                      display="spinner"
+                      minuteInterval={5}
+                      onChange={(event, selectedTime) => {
+                        if (selectedTime) {
+                          setEndTimePickerValue(selectedTime);
+                          setDueTimeEnd(selectedTime);
+                        }
+                      }}
+                    />
+                  </View>
+                  <View className="flex-row gap-3 mt-2">
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        }
+                        setDueTimeEnd(endTimeBeforeOpenRef.current);
+                        setShowEndTimePicker(false);
+                      }}
+                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-semibold">
+                        Cancel
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        }
+                        setDueTimeEnd(endTimePickerValue ?? dueTime ?? getDefaultTime());
+                        setShowEndTimePicker(false);
                       }}
                       className="flex-1 bg-primary rounded-xl py-3 items-center"
                     >
@@ -666,6 +786,21 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                     setShowTimePicker(false);
                     if (event.type === 'set' && selectedTime) {
                       setDueTime(selectedTime);
+                    }
+                  }}
+                />
+              )}
+
+              {Platform.OS === 'android' && showEndTimePicker && (
+                <DateTimePicker
+                  value={dueTimeEnd || dueTime || getDefaultTime()}
+                  mode="time"
+                  display="default"
+                  minuteInterval={5}
+                  onChange={(event, selectedTime) => {
+                    setShowEndTimePicker(false);
+                    if (event.type === 'set' && selectedTime) {
+                      setDueTimeEnd(selectedTime);
                     }
                   }}
                 />
@@ -719,35 +854,103 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
               )}
 
               {Platform.OS === 'web' && showTimePicker && (
-                <View className="mb-4">
+                <View className="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                  <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">시작 시간</Text>
                   <input
                     ref={timeInputRef}
                     type="time"
-                    defaultValue={dueTime ? format(dueTime, 'HH:mm') : format(getDefaultTime(), 'HH:mm')}
+                    value={format(webStartPickerValue ?? getDefaultTime(), 'HH:mm')}
                     step="300"
                     onChange={(e) => {
                       if (e.target.value) {
-                        const [hours, minutes] = e.target.value.split(':');
-                        const selected = new Date();
-                        selected.setHours(parseInt(hours), parseInt(minutes), 0);
-                        setDueTime(selected);
+                        const [h, m] = e.target.value.split(':');
+                        const d = new Date();
+                        d.setHours(parseInt(h, 10), parseInt(m, 10), 0);
+                        setWebStartPickerValue(d);
                       }
-                      setShowTimePicker(false);
                     }}
-                    onBlur={() => setShowTimePicker(false)}
                     style={{
                       width: '100%',
-                      padding: '12px',
-                      borderRadius: '12px',
+                      padding: 12,
+                      borderRadius: 12,
                       border: '1px solid #d1d5db',
-                      fontSize: '16px',
+                      fontSize: 16,
+                      marginBottom: 12,
                     }}
                   />
+                  <View className="flex-row gap-3">
+                    <Pressable
+                      onPress={() => {
+                        setDueTime(timeBeforeOpenRef.current);
+                        setShowTimePicker(false);
+                      }}
+                      className="flex-1 bg-white dark:bg-gray-700 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-600"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-semibold">Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setDueTime(webStartPickerValue ?? getDefaultTime());
+                        setShowTimePicker(false);
+                      }}
+                      className="flex-1 bg-primary rounded-xl py-3 items-center"
+                    >
+                      <Text className="text-white font-semibold">Apply</Text>
+                    </Pressable>
+                  </View>
                 </View>
               )}
 
-              {/* Action Buttons - DatePicker가 열려있지 않을 때만 표시 */}
-              {!showDatePicker && !showTimePicker && (
+              {Platform.OS === 'web' && showEndTimePicker && (
+                <View className="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                  <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">종료 시간</Text>
+                  <input
+                    ref={endTimeInputRef}
+                    type="time"
+                    value={format(webEndPickerValue ?? getDefaultTime(), 'HH:mm')}
+                    step="300"
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const [h, m] = e.target.value.split(':');
+                        const d = new Date();
+                        d.setHours(parseInt(h, 10), parseInt(m, 10), 0);
+                        setWebEndPickerValue(d);
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: 12,
+                      borderRadius: 12,
+                      border: '1px solid #d1d5db',
+                      fontSize: 16,
+                      marginBottom: 12,
+                    }}
+                  />
+                  <View className="flex-row gap-3">
+                    <Pressable
+                      onPress={() => {
+                        setDueTimeEnd(endTimeBeforeOpenRef.current);
+                        setShowEndTimePicker(false);
+                      }}
+                      className="flex-1 bg-white dark:bg-gray-700 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-600"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-semibold">Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setDueTimeEnd(webEndPickerValue ?? getDefaultTime());
+                        setShowEndTimePicker(false);
+                      }}
+                      className="flex-1 bg-primary rounded-xl py-3 items-center"
+                    >
+                      <Text className="text-white font-semibold">Apply</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {/* Action Buttons - DatePicker/시간 모달이 열려있지 않을 때만 표시 */}
+              {!showDatePicker && !showTimePicker && !showEndTimePicker && (
                 <View className="flex-row gap-3 mt-2">
                   <Pressable
                     onPress={() => {

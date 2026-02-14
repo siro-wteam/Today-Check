@@ -58,6 +58,7 @@ export interface Task {
   status: 'TODO' | 'DONE' | 'CANCELLED';
   due_date: string | null;
   due_time: string | null;
+  due_time_end: string | null;
   original_due_date: string | null;
   completed_at: string | null;
   created_at: string;
@@ -75,6 +76,7 @@ export interface TaskWithRollover {
   status: 'TODO' | 'DONE' | 'CANCELLED';
   due_date: string | null;
   due_time: string | null;
+  due_time_end: string | null;
   original_due_date: string | null;
   completed_at: string | null;
   created_at: string;
@@ -98,6 +100,7 @@ export interface CreateTaskInput {
   status?: 'TODO' | 'DONE' | 'CANCELLED';
   due_date?: string;
   due_time?: string;
+  due_time_end?: string;
   group_id?: string;
   assignee_ids?: string[];
 }
@@ -107,6 +110,7 @@ export interface CreateTaskWithAssigneesInput {
   description?: string;
   due_date?: string;
   due_time?: string;
+  due_time_end?: string;
   group_id?: string;
   assignees?: { user_id: string; is_completed?: boolean }[];
 }
@@ -118,6 +122,7 @@ export interface UpdateTaskInput {
   status?: 'TODO' | 'DONE' | 'CANCELLED';
   due_date?: string;
   due_time?: string;
+  due_time_end?: string;
   completed_at?: string | null;
 }
 
@@ -589,6 +594,7 @@ export async function createTask(input: CreateTaskInput) {
     status: input.status || 'TODO',
     due_date: input.due_date || null,
     due_time: input.due_time || null,
+    due_time_end: input.due_time_end || null,
     original_due_date: input.due_date || null,
   };
 
@@ -674,6 +680,7 @@ export async function createTaskWithAssignees(input: CreateTaskWithAssigneesInpu
     status: 'TODO' as const,
     due_date: input.due_date || null,
     due_time: input.due_time || null,
+    due_time_end: input.due_time_end || null,
     original_due_date: input.due_date || null,
   };
 
@@ -1135,6 +1142,7 @@ export async function duplicateTasksToNextWeek(
       group_id,
       due_date,
       due_time,
+      due_time_end,
       creator_id,
       task_assignees (
         user_id,
@@ -1167,6 +1175,7 @@ export async function duplicateTasksToNextWeek(
       status: 'TODO',
       due_date: dueDate,
       due_time: t.due_time ?? null,
+      due_time_end: t.due_time_end ?? null,
       original_due_date: originalDueDate,
     };
   });

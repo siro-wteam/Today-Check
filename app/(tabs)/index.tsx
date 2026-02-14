@@ -10,6 +10,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { TaskStatus } from '@/lib/types';
+import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
 import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
@@ -1107,12 +1108,6 @@ const DailyCard = React.memo(function DailyCard({
     await updateTaskInStore(task.id, updates);
   };
   
-  // Memoize formatTime function (no dependencies, pure function)
-  const formatTime = useCallback((time: string | null) => {
-    if (!time) return null;
-    return time.substring(0, 5);
-  }, []);
-  
   // Memoize isLateCompletion calculation helper
   const calculateLateCompletion = useCallback((task: TaskWithOverdue): number => {
     if (task.status !== 'DONE' || !task.completed_at) return 0;
@@ -1352,11 +1347,11 @@ const DailyCard = React.memo(function DailyCard({
                           ) : null;
                         })()}
                         
-                        {task.due_time && (
+                        {(task.due_time || task.due_time_end) && (
                           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
                             <Clock size={10} color="#64748B" strokeWidth={2} />
                             <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
-                              {String(formatTime(task.due_time) || '')}
+                              {String(formatTimeRange(task.due_time, task.due_time_end ?? null) || '')}
                             </Text>
                           </View>
                         )}

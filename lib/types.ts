@@ -29,7 +29,8 @@ export interface Task {
   title: string;
   status: TaskStatus;
   due_date: string | null; // ISO date string (YYYY-MM-DD) or null for Backlog
-  due_time: string | null; // Time string (HH:MM:SS) or null
+  due_time: string | null; // Start time (HH:MM:SS) or null
+  due_time_end: string | null; // End time (HH:MM:SS) or null, optional
   original_due_date: string | null; // ISO date string, set once on creation
   completed_at: string | null; // ISO timestamp when task was marked as DONE
   created_at: string; // ISO timestamp
@@ -45,6 +46,7 @@ export interface CreateTaskInput {
   status?: TaskStatus;
   due_date?: string | null;
   due_time?: string | null;
+  due_time_end?: string | null;
   original_due_date?: string | null;
   group_id?: string | null; // For group tasks
   assignee_id?: string; // For personal tasks, defaults to current user
@@ -57,6 +59,7 @@ export interface CreateTaskWithAssigneesInput {
   assignee_ids: string[]; // Array of user IDs to assign to the task
   due_date?: string | null;
   due_time?: string | null;
+  due_time_end?: string | null;
 }
 
 // Type for updating a task (all fields optional except id)
@@ -66,6 +69,7 @@ export interface UpdateTaskInput {
   status?: TaskStatus;
   due_date?: string | null;
   due_time?: string | null;
+  due_time_end?: string | null;
   completed_at?: string | null;
   group_id?: string | null; // Allow changing group (null = personal task)
   // Note: original_due_date should NOT be updated after creation

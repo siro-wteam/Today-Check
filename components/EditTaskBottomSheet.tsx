@@ -9,7 +9,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Package, Trash2, Users } from 'lucide-react-native';
+import { Package, Trash2, Users, X } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,8 +34,14 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   const [title, setTitle] = useState(task.title || '');
   const [dueDate, setDueDate] = useState<Date | null>(task.due_date ? parseISO(task.due_date) : null);
   const [dueTime, setDueTime] = useState<Date | null>(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
+  const [dueTimeEnd, setDueTimeEnd] = useState<Date | null>(task.due_time_end ? parseISO(`2000-01-01T${task.due_time_end}`) : null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [timePickerValue, setTimePickerValue] = useState<Date | null>(null);
+  const [endTimePickerValue, setEndTimePickerValue] = useState<Date | null>(null);
+  const [webStartPickerValue, setWebStartPickerValue] = useState<Date | null>(null);
+  const [webEndPickerValue, setWebEndPickerValue] = useState<Date | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(task.group_id || null);
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>(
     task.assignees?.map(a => a.user_id) || []
@@ -44,7 +50,10 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   const prevVisibleRef = useRef(false);
   const dateInputRef = useRef<any>(null);
   const timeInputRef = useRef<any>(null);
+  const endTimeInputRef = useRef<any>(null);
   const onDateChangeRef = useRef(onDateChange);
+  const timeBeforeOpenRef = useRef<Date | null>(null);
+  const endTimeBeforeOpenRef = useRef<Date | null>(null);
   
   // Update ref when onDateChange changes
   useEffect(() => {
@@ -65,14 +74,16 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       setTitle(task.title);
       setDueDate(task.due_date ? parseISO(task.due_date) : null);
       setDueTime(task.due_time ? parseISO(`2000-01-01T${task.due_time}`) : null);
+      setDueTimeEnd(task.due_time_end ? parseISO(`2000-01-01T${task.due_time_end}`) : null);
       setSelectedGroupId(task.group_id || null);
       setSelectedAssigneeIds(task.assignees?.map(a => a.user_id) || []);
       setShowDatePicker(false);
       setShowTimePicker(false);
+      setShowEndTimePicker(false);
       setIsSaving(false); // Reset saving state when modal opens
     }
     prevVisibleRef.current = visible;
-  }, [visible, task.title, task.due_date, task.due_time, task.group_id, task.assignees]);
+  }, [visible, task.title, task.due_date, task.due_time, task.due_time_end, task.group_id, task.assignees]);
 
   // 웹에서 날짜 선택기 자동 열기
   useEffect(() => {
@@ -89,20 +100,32 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
     }
   }, [showDatePicker]);
 
-  // 웹에서 시간 선택기 자동 열기
+  // 웹에서는 커스텀 모달(Cancel/Apply) 사용 → showPicker 호출 안 함
   useEffect(() => {
-    if (Platform.OS === 'web' && showTimePicker && timeInputRef.current) {
-      // Use requestAnimationFrame to ensure DOM is ready
+    if (Platform.OS === 'web') return;
+    if (showTimePicker && timeInputRef.current) {
       requestAnimationFrame(() => {
         try {
           timeInputRef.current?.showPicker?.();
         } catch (error) {
-          // Fallback: focus the input if showPicker fails
           timeInputRef.current?.focus?.();
         }
       });
     }
   }, [showTimePicker]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (showEndTimePicker && endTimeInputRef.current) {
+      requestAnimationFrame(() => {
+        try {
+          endTimeInputRef.current?.showPicker?.();
+        } catch (error) {
+          endTimeInputRef.current?.focus?.();
+        }
+      });
+    }
+  }, [showEndTimePicker]);
 
   // Check if user can edit this task
   const canEdit = (() => {
@@ -286,6 +309,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       // Format dates
       const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
       const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
+      const dueTimeEndStr = dueTimeEnd ? format(dueTimeEnd, 'HH:mm:ss') : null;
 
       // Create optimistic task for immediate UI update
       const optimisticTask: Task = {
@@ -293,6 +317,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
         title: title.trim(),
         due_date: dueDateStr,
         due_time: dueTimeStr,
+        due_time_end: dueTimeEndStr,
         group_id: selectedGroupId,
         updated_at: new Date().toISOString(),
       };
@@ -320,6 +345,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
         title: title.trim(),
         due_date: dueDateStr,
         due_time: dueTimeStr,
+        due_time_end: dueTimeEndStr,
         group_id: selectedGroupId,
       });
 
@@ -767,27 +793,78 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                   >
                     {dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
                       ? format(dueDate, 'MMM d')
-                      : '📅 Pick Date'}
+                      : '📅 Date'}
                   </Text>
                 </Pressable>
               </View>
 
-              {/* Time Selection */}
+              {/* Time Selection: [아이콘+시작시간+제거] ~ [아이콘+종료시간+제거] */}
               {dueDate && (
-                <Pressable
-                  onPress={() => {
-                    if (Platform.OS === 'ios') {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                    }
-                    setShowTimePicker(true);
-                  }}
-                  disabled={!canEdit}
-                  className={`bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 mb-4 ${!canEdit ? 'opacity-50' : ''}`}
-                >
-                  <Text className="text-gray-700 dark:text-gray-300">
-                    {dueTime ? `⏰ ${format(dueTime, 'HH:mm')}` : '⏰ Pick Time (Optional)'}
-                  </Text>
-                </Pressable>
+                <View className={`flex-row items-center flex-wrap gap-2 mb-4 ${!canEdit ? 'opacity-50' : ''}`} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {/* 그룹: 시작시간 */}
+                  <View className="flex-row items-center rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-2 pr-1 py-2" style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text className="text-gray-700 dark:text-gray-300 mr-1.5">🕐</Text>
+                    <Pressable
+                      onPress={() => {
+                        if (!canEdit) return;
+                        if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      timeBeforeOpenRef.current = dueTime ? new Date(dueTime.getTime()) : null;
+                        setTimePickerValue(dueTime ?? getDefaultTime());
+                        if (Platform.OS === 'web') setWebStartPickerValue(dueTime ?? getDefaultTime());
+                        setShowTimePicker(true);
+                      }}
+                    className="py-1 px-1 rounded min-w-[64px]"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-medium">
+                        {dueTime ? format(dueTime, 'HH:mm') : 'Start (Optional)'}
+                      </Text>
+                    </Pressable>
+                    {canEdit && dueTime != null && (
+                      <Pressable
+                        onPress={() => {
+                          if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                          setDueTime(null);
+                        }}
+                        className="rounded-full p-1 ml-0.5 items-center justify-center bg-gray-200/40 dark:bg-gray-600/40 active:opacity-70"
+                        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                      >
+                        <X size={14} color="#64748B" strokeWidth={2.5} />
+                      </Pressable>
+                    )}
+                  </View>
+                  <Text className="text-gray-500 dark:text-gray-400 font-medium">~</Text>
+                  {/* 그룹: 종료시간 */}
+                  <View className="flex-row items-center rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-2 pr-1 py-2" style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text className="text-gray-700 dark:text-gray-300 mr-1.5">🕐</Text>
+                    <Pressable
+                      onPress={() => {
+                        if (!canEdit) return;
+                        if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      endTimeBeforeOpenRef.current = dueTimeEnd ? new Date(dueTimeEnd.getTime()) : null;
+                        setEndTimePickerValue(dueTimeEnd ?? dueTime ?? getDefaultTime());
+                        if (Platform.OS === 'web') setWebEndPickerValue(dueTimeEnd ?? dueTime ?? getDefaultTime());
+                        setShowEndTimePicker(true);
+                      }}
+                    className="py-1 px-1 rounded min-w-[64px]"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-medium">
+                        {dueTimeEnd ? format(dueTimeEnd, 'HH:mm') : 'End (Optional)'}
+                      </Text>
+                    </Pressable>
+                    {canEdit && dueTimeEnd != null && (
+                      <Pressable
+                        onPress={() => {
+                          if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                          setDueTimeEnd(null);
+                        }}
+                        className="rounded-full p-1 ml-0.5 items-center justify-center bg-gray-200/40 dark:bg-gray-600/40 active:opacity-70"
+                        hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                      >
+                        <X size={14} color="#64748B" strokeWidth={2.5} />
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
               )}
 
               {/* DateTimePicker - Web (HTML Input) - Always rendered but hidden */}
@@ -839,23 +916,20 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                       </Text>
                     </View>
                   )}
-                  {/* Hidden input for time picker - always rendered */}
+                  {/* Hidden input for time (native only; web uses modal below) */}
                   <input
                     ref={timeInputRef}
                     type="time"
                     value={dueTime ? format(dueTime, 'HH:mm') : ''}
                     onChange={(e) => {
                       if (e.target.value) {
-                        const [hours, minutes] = e.target.value.split(':');
-                        const selected = new Date();
-                        selected.setHours(parseInt(hours, 10));
-                        selected.setMinutes(parseInt(minutes, 10));
-                        selected.setSeconds(0);
-                        setDueTime(selected);
+                        const [h, m] = e.target.value.split(':');
+                        const d = new Date();
+                        d.setHours(parseInt(h, 10), parseInt(m, 10), 0);
+                        setDueTime(d);
                       }
                       setShowTimePicker(false);
                     }}
-                    onBlur={() => setShowTimePicker(false)}
                     style={{
                       position: 'absolute',
                       opacity: 0,
@@ -865,11 +939,119 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                       zIndex: -1,
                     }}
                   />
+                  <input
+                    ref={endTimeInputRef}
+                    type="time"
+                    value={dueTimeEnd ? format(dueTimeEnd, 'HH:mm') : ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const [h, m] = e.target.value.split(':');
+                        const d = new Date();
+                        d.setHours(parseInt(h, 10), parseInt(m, 10), 0);
+                        setDueTimeEnd(d);
+                      }
+                      setShowEndTimePicker(false);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      opacity: 0,
+                      width: 0,
+                      height: 0,
+                      pointerEvents: 'none',
+                      zIndex: -1,
+                    }}
+                  />
+                  {/* Web: 시간 선택 모달 (Cancel / Apply) */}
                   {showTimePicker && (
-                    <View className="mb-4">
-                      <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                        시간을 선택하세요
-                      </Text>
+                    <View className="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                      <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">시작 시간</Text>
+                      <input
+                        type="time"
+                        value={format(webStartPickerValue ?? getDefaultTime(), 'HH:mm')}
+                        step="300"
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            const [h, m] = e.target.value.split(':');
+                            const d = new Date();
+                            d.setHours(parseInt(h, 10), parseInt(m, 10), 0);
+                            setWebStartPickerValue(d);
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: 12,
+                          borderRadius: 12,
+                          border: '1px solid #d1d5db',
+                          fontSize: 16,
+                          marginBottom: 12,
+                        }}
+                      />
+                      <View className="flex-row gap-3">
+                        <Pressable
+                          onPress={() => {
+                            setDueTime(timeBeforeOpenRef.current);
+                            setShowTimePicker(false);
+                          }}
+                          className="flex-1 bg-white dark:bg-gray-700 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-600"
+                        >
+                          <Text className="text-gray-700 dark:text-gray-300 font-semibold">Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            setDueTime(webStartPickerValue ?? getDefaultTime());
+                            setShowTimePicker(false);
+                          }}
+                          className="flex-1 bg-primary rounded-xl py-3 items-center"
+                        >
+                          <Text className="text-white font-semibold">Apply</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
+                  {showEndTimePicker && (
+                    <View className="mb-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                      <Text className="text-sm text-gray-600 dark:text-gray-400 mb-2">종료 시간</Text>
+                      <input
+                        type="time"
+                        value={format(webEndPickerValue ?? getDefaultTime(), 'HH:mm')}
+                        step="300"
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            const [h, m] = e.target.value.split(':');
+                            const d = new Date();
+                            d.setHours(parseInt(h, 10), parseInt(m, 10), 0);
+                            setWebEndPickerValue(d);
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: 12,
+                          borderRadius: 12,
+                          border: '1px solid #d1d5db',
+                          fontSize: 16,
+                          marginBottom: 12,
+                        }}
+                      />
+                      <View className="flex-row gap-3">
+                        <Pressable
+                          onPress={() => {
+                            setDueTimeEnd(endTimeBeforeOpenRef.current);
+                            setShowEndTimePicker(false);
+                          }}
+                          className="flex-1 bg-white dark:bg-gray-700 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-600"
+                        >
+                          <Text className="text-gray-700 dark:text-gray-300 font-semibold">Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            setDueTimeEnd(webEndPickerValue ?? getDefaultTime());
+                            setShowEndTimePicker(false);
+                          }}
+                          className="flex-1 bg-primary rounded-xl py-3 items-center"
+                        >
+                          <Text className="text-white font-semibold">Apply</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   )}
                 </>
@@ -910,6 +1092,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                         }
                         setDueDate(null);
                         setDueTime(null);
+                        setDueTimeEnd(null);
                         setShowDatePicker(false);
                       }}
                       className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
@@ -937,12 +1120,13 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-2 mb-4" style={{ maxHeight: 250 }}>
                   <View style={{ transform: [{ scale: 0.85 }], marginTop: -10, marginBottom: -10 }}>
                     <DateTimePicker
-                      value={dueTime || getDefaultTime()}
+                      value={timePickerValue ?? getDefaultTime()}
                       mode="time"
                       display="spinner"
                       minuteInterval={5}
                       onChange={(event, selectedTime) => {
                         if (selectedTime) {
+                          setTimePickerValue(selectedTime);
                           setDueTime(selectedTime);
                         }
                       }}
@@ -954,7 +1138,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                         if (Platform.OS === 'ios') {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                         }
-                        setDueTime(null);
+                        setDueTime(timeBeforeOpenRef.current);
                         setShowTimePicker(false);
                       }}
                       className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
@@ -968,7 +1152,55 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                         if (Platform.OS === 'ios') {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
                         }
+                        setDueTime(timePickerValue ?? getDefaultTime());
                         setShowTimePicker(false);
+                      }}
+                      className="flex-1 bg-primary rounded-xl py-3 items-center"
+                    >
+                      <Text className="text-white font-semibold">Apply</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {Platform.OS === 'ios' && showEndTimePicker && (
+                <View className="bg-gray-50 dark:bg-gray-800 rounded-xl p-2 mb-4" style={{ maxHeight: 250 }}>
+                  <View style={{ transform: [{ scale: 0.85 }], marginTop: -10, marginBottom: -10 }}>
+                    <DateTimePicker
+                      value={endTimePickerValue ?? dueTime ?? getDefaultTime()}
+                      mode="time"
+                      display="spinner"
+                      minuteInterval={5}
+                      onChange={(event, selectedTime) => {
+                        if (selectedTime) {
+                          setEndTimePickerValue(selectedTime);
+                          setDueTimeEnd(selectedTime);
+                        }
+                      }}
+                    />
+                  </View>
+                  <View className="flex-row gap-3 mt-2">
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        }
+                        setDueTimeEnd(endTimeBeforeOpenRef.current);
+                        setShowEndTimePicker(false);
+                      }}
+                      className="flex-1 bg-white dark:bg-gray-900 rounded-xl py-3 items-center border border-gray-200 dark:border-gray-700"
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-semibold">
+                        Cancel
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        }
+                        setDueTimeEnd(endTimePickerValue ?? dueTime ?? getDefaultTime());
+                        setShowEndTimePicker(false);
                       }}
                       className="flex-1 bg-primary rounded-xl py-3 items-center"
                     >
@@ -1026,8 +1258,23 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 />
               )}
 
+              {Platform.OS === 'android' && showEndTimePicker && (
+                <DateTimePicker
+                  value={dueTimeEnd || dueTime || getDefaultTime()}
+                  mode="time"
+                  display="default"
+                  minuteInterval={5}
+                  onChange={(event, selectedTime) => {
+                    setShowEndTimePicker(false);
+                    if (event.type === 'set' && selectedTime) {
+                      setDueTimeEnd(selectedTime);
+                    }
+                  }}
+                />
+              )}
+
               {/* Action Buttons - DatePicker가 열려있지 않을 때만 표시 */}
-              {!showDatePicker && !showTimePicker && (
+              {!showDatePicker && !showTimePicker && !showEndTimePicker && (
                 <View className="flex-row gap-3 mt-2">
                   <Pressable
                     onPress={() => {

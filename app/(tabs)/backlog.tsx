@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { useBacklogTasks } from '@/lib/hooks/use-backlog-tasks';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { Task } from '@/lib/types';
+import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
@@ -460,19 +461,14 @@ function BacklogItem({
     title: task.title,
     due_date: task.due_date,
     due_time: task.due_time,
+    due_time_end: task.due_time_end ?? null,
     group_id: task.group_id || null,
     assignees: task.assignees?.map(a => ({
       user_id: a.user_id,
       profile: a.profile,
     })) || [],
     status: task.status,
-  }), [task.id, task.title, task.due_date, task.due_time, task.group_id, task.assignees, task.status]);
-
-  // Format time
-  const formatTime = (time: string | null) => {
-    if (!time) return null;
-    return time.substring(0, 5);
-  };
+  }), [task.id, task.title, task.due_date, task.due_time, task.due_time_end, task.group_id, task.assignees, task.status]);
 
   const isCancelled = task.status === 'CANCEL';
   const isTodo = task.status === 'TODO';
@@ -582,7 +578,7 @@ function BacklogItem({
               </Pressable>
 
               {/* Time Badge - 제목 바로 옆에 표시 */}
-              {task.due_time && (
+              {(task.due_time || task.due_time_end) && (
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -599,7 +595,7 @@ function BacklogItem({
                     color: '#475569', // Slate 600
                     marginLeft: 4,
                   }}>
-                    {String(formatTime(task.due_time) || '')}
+                    {String(formatTimeRange(task.due_time, task.due_time_end ?? null) || '')}
                   </Text>
                 </View>
               )}

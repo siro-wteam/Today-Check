@@ -142,6 +142,7 @@ export async function scheduleTaskNotification(task: Task): Promise<string | nul
  * @param notificationId - Notification ID to cancel
  */
 export async function cancelTaskNotification(notificationId: string): Promise<void> {
+  if (Platform.OS === 'web') return;
   try {
     await Notifications.cancelScheduledNotificationAsync(notificationId);
     console.log(`[cancelTaskNotification] Cancelled notification ${notificationId}`);
@@ -156,6 +157,7 @@ export async function cancelTaskNotification(notificationId: string): Promise<vo
  * @param taskId - Task ID to cancel notifications for
  */
 export async function cancelAllNotificationsForTask(taskId: string): Promise<void> {
+  if (Platform.OS === 'web') return;
   try {
     const scheduledNotifications = await Notifications.getAllScheduledNotificationsAsync();
     

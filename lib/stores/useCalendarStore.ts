@@ -341,6 +341,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       status: 'TODO' as const,
       due_date: input.due_date || null,
       due_time: input.due_time || null,
+      due_time_end: input.due_time_end ?? null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       completed_at: null,

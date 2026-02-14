@@ -12,6 +12,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { TaskStatus, TaskWithRollover } from '@/lib/types';
+import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
 import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
@@ -948,11 +949,6 @@ function TaskItem({
     return daysLate > 0 ? daysLate : 0;
   }, [isDone, task.completed_at, task.original_due_date, task.due_date]);
   
-  // Format time from HH:MM:SS to HH:MM
-  const formatTime = (time: string | null) => {
-    if (!time) return null;
-    return time.substring(0, 5);
-  };
 
   // Change status (with validation)
   const changeStatus = async (targetStatus: TaskStatus) => {
@@ -1197,13 +1193,14 @@ function TaskItem({
     title: task.title,
     due_date: task.due_date,
     due_time: task.due_time,
+    due_time_end: task.due_time_end ?? null,
     group_id: task.group_id || null,
     assignees: task.assignees?.map((a: any) => ({
       user_id: a.user_id,
       profile: a.profile,
     })) || [],
     status: task.status,
-  }), [task.id, task.title, task.due_date, task.due_time, task.group_id, task.assignees, task.status]);
+  }), [task.id, task.title, task.due_date, task.due_time, task.due_time_end, task.group_id, task.assignees, task.status]);
 
   // Send to Backlog (remove due_date)
   const handleSendToBacklog = async () => {
@@ -1316,7 +1313,7 @@ function TaskItem({
               </Pressable>
 
               {/* Time Badge - 제목 바로 옆에 표시 */}
-              {task.due_time && (
+              {(task.due_time || task.due_time_end) && (
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -1333,7 +1330,7 @@ function TaskItem({
                     color: '#475569', // Slate 600
                     marginLeft: 4,
                   }}>
-                    {formatTime(task.due_time)}
+                    {formatTimeRange(task.due_time, task.due_time_end ?? null)}
                   </Text>
                 </View>
               )}
@@ -1459,6 +1456,7 @@ export const MemoizedTaskItem = React.memo(TaskItem, (prevProps, nextProps) => {
     prevProps.task.title === nextProps.task.title &&
     prevProps.task.due_date === nextProps.task.due_date &&
     prevProps.task.due_time === nextProps.task.due_time &&
+    prevProps.task.due_time_end === nextProps.task.due_time_end &&
     prevProps.task.completed_at === nextProps.task.completed_at &&
     prevProps.task.group_id === nextProps.task.group_id &&
     JSON.stringify(prevProps.task.assignees) === JSON.stringify(nextProps.task.assignees) &&
