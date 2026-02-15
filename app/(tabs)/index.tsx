@@ -361,64 +361,67 @@ export default function WeekScreen() {
   );
 
   // Copy visible week to next week (이번주 또는 미래주에서 해당 주 → 다음 주로 복사)
+  const runCopyWeekToNext = useCallback(async () => {
+    setCopyInProgress(true);
+    const weekStart = parseISO(currentWeekStartStr);
+    const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+    const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
+
+    const sourceWeekTasks = tasks.filter(
+      t => t.due_date && t.due_date >= currentWeekStartStr && t.due_date <= weekEndStr
+    );
+
+    const now = new Date().toISOString();
+    const nextWeekDate = (d: string) => format(addWeeks(parseISO(d), 1), 'yyyy-MM-dd');
+    const optimisticTasks = sourceWeekTasks.map((t, i) => {
+      const { isOverdue, daysOverdue, ...rest } = t as any;
+      return {
+        ...rest,
+        id: `opt-copy-${Date.now()}-${i}`,
+        due_date: nextWeekDate(t.due_date!),
+        original_due_date: nextWeekDate(t.due_date!),
+        status: 'TODO' as const,
+        completed_at: null,
+        created_at: now,
+        updated_at: now,
+        assignees: (t.assignees ?? []).map((a: any) => ({ ...a, is_completed: false, completed_at: null })),
+      };
+    });
+
+    if (optimisticTasks.length > 0) {
+      mergeTasksIntoStore(optimisticTasks);
+    }
+
+    const { error } = await duplicateTasksToNextWeek(weekStart, weekEnd);
+    setCopyInProgress(false);
+
+    if (error) {
+      if (optimisticTasks.length > 0) rollbackCopyWeek();
+      showToast('error', 'Copy failed', error?.message ?? 'Something went wrong.');
+      return;
+    }
+    showToast('success', 'Done', 'Copy completed.');
+    queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+    initializeCalendar();
+  }, [currentWeekStartStr, tasks, mergeTasksIntoStore, rollbackCopyWeek, queryClient, initializeCalendar]);
+
   const handleCopyWeekToNext = useCallback(() => {
     if (Platform.OS === 'ios') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
-    Alert.alert(
-      'Copy to next week',
-      "Copy this week's schedule to the same weekdays next week. Continue?",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'OK',
-          onPress: async () => {
-            setCopyInProgress(true);
-            const weekStart = parseISO(currentWeekStartStr);
-            const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
-            const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
-
-            const sourceWeekTasks = tasks.filter(
-              t => t.due_date && t.due_date >= currentWeekStartStr && t.due_date <= weekEndStr
-            );
-
-            const now = new Date().toISOString();
-            const nextWeekDate = (d: string) => format(addWeeks(parseISO(d), 1), 'yyyy-MM-dd');
-            const optimisticTasks = sourceWeekTasks.map((t, i) => {
-              const { isOverdue, daysOverdue, ...rest } = t as any;
-              return {
-                ...rest,
-                id: `opt-copy-${Date.now()}-${i}`,
-                due_date: nextWeekDate(t.due_date!),
-                original_due_date: nextWeekDate(t.due_date!),
-                status: 'TODO' as const,
-                completed_at: null,
-                created_at: now,
-                updated_at: now,
-                assignees: (t.assignees ?? []).map((a: any) => ({ ...a, is_completed: false, completed_at: null })),
-              };
-            });
-
-            if (optimisticTasks.length > 0) {
-              mergeTasksIntoStore(optimisticTasks);
-            }
-
-            const { data, error } = await duplicateTasksToNextWeek(weekStart, weekEnd);
-            setCopyInProgress(false);
-
-            if (error) {
-              if (optimisticTasks.length > 0) rollbackCopyWeek();
-              showToast('error', 'Copy failed', error?.message ?? 'Something went wrong.');
-              return;
-            }
-            showToast('success', 'Done', 'Copy completed.');
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-            initializeCalendar();
-          },
-        },
-      ]
-    );
-  }, [currentWeekStartStr, tasks, mergeTasksIntoStore, rollbackCopyWeek, queryClient, initializeCalendar]);
+    const title = 'Copy to next week';
+    const message = "Copy this week's schedule to the same weekdays next week. Continue?";
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) {
+        runCopyWeekToNext();
+      }
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'OK', onPress: runCopyWeekToNext },
+    ]);
+  }, [runCopyWeekToNext]);
 
   // Handle quick add task
   const handleQuickAdd = (dateStr: string) => {
@@ -1048,7 +1051,7 @@ const DailyCard = React.memo(function DailyCard({
         }
 
         try {
-          const { toggleAssigneeCompletion, getTaskById } = await import('@/lib/api/tasks');
+          const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
           const { error } = await toggleAssigneeCompletion(
             task.id,
             user.id,
@@ -1063,15 +1066,8 @@ const DailyCard = React.memo(function DailyCard({
               useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-          } else {
-            // Fetch updated task and update store with server response
-            const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
-            if (!fetchError && updatedTask) {
-              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
-              const tasksWithRollover = calculateRolloverInfo([updatedTask]);
-              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-            }
           }
+          // Success: keep optimistic update; no getTaskById merge (avoids late response overwriting)
         } catch (error) {
           console.error('Exception toggling assignee:', error);
           // Rollback on exception
@@ -1255,6 +1251,8 @@ const DailyCard = React.memo(function DailyCard({
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                       <Pressable
                         onPress={() => handleToggleComplete(task)}
+                        hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                        pressRetentionOffset={{ top: 22, bottom: 22, left: 22, right: 22 }}
                         style={[
                           {
                             width: 18,
@@ -1316,56 +1314,54 @@ const DailyCard = React.memo(function DailyCard({
                       </View>
                     </View>
                     
-                    {/* Second line: Badges (Assignees + Progress + Group + Time + Backlog) */}
-                    {!isDone && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8, marginLeft: 36 }}>
-                        {task.group_id && task.assignees && task.assignees.length > 0 && (
-                          <AssigneeAvatars
-                            taskId={task.id}
-                            groupId={task.group_id}
-                            assignees={task.assignees.map(a => ({
-                              user_id: a.user_id,
-                              nickname: a.profile?.nickname || 'Unknown',
-                              avatar_url: a.profile?.avatar_url || null,
-                              is_completed: a.is_completed,
-                              completed_at: a.completed_at,
-                            }))}
-                            size={20}
-                            showCompletionRate={false}
-                          />
-                        )}
-                        
-                        {task.group_id && (() => {
-                          const groupName = groupsMap.get(task.group_id)?.name;
-                          return groupName ? (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0, maxWidth: 100 }}>
-                              <Users size={10} color="#64748B" strokeWidth={2} />
-                              <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
-                                {String(groupName)}
-                              </Text>
-                            </View>
-                          ) : null;
-                        })()}
-                        
-                        {(task.due_time || task.due_time_end) && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
-                            <Clock size={10} color="#64748B" strokeWidth={2} />
-                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
-                              {String(formatTimeRange(task.due_time, task.due_time_end ?? null) || '')}
+                    {/* Second line: Badges (Assignees + Group + Time + Backlog) - shown for both TODO and DONE */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8, marginLeft: 36 }}>
+                      {task.group_id && task.assignees && task.assignees.length > 0 && (
+                        <AssigneeAvatars
+                          taskId={task.id}
+                          groupId={task.group_id}
+                          assignees={task.assignees.map(a => ({
+                            user_id: a.user_id,
+                            nickname: a.profile?.nickname || 'Unknown',
+                            avatar_url: a.profile?.avatar_url || null,
+                            is_completed: a.is_completed,
+                            completed_at: a.completed_at,
+                          }))}
+                          size={20}
+                          showCompletionRate={false}
+                        />
+                      )}
+                      
+                      {task.group_id && (() => {
+                        const groupName = groupsMap.get(task.group_id)?.name;
+                        return groupName ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0, maxWidth: 100 }}>
+                            <Users size={10} color="#64748B" strokeWidth={2} />
+                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
+                              {String(groupName)}
                             </Text>
                           </View>
-                        )}
-                        
-                        {!task.due_date && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
-                            <Package size={10} color="#64748B" strokeWidth={2} />
-                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
-                              Backlog
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    )}
+                        ) : null;
+                      })()}
+                      
+                      {(task.due_time || task.due_time_end) && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
+                          <Clock size={10} color="#64748B" strokeWidth={2} />
+                          <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
+                            {String(formatTimeRange(task.due_time, task.due_time_end ?? null) || '')}
+                          </Text>
+                        </View>
+                      )}
+                      
+                      {!task.due_date && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
+                          <Package size={10} color="#64748B" strokeWidth={2} />
+                          <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
+                            Backlog
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </View>
               );

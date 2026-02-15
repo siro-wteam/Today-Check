@@ -744,24 +744,35 @@ export async function createTaskWithAssignees(input: CreateTaskWithAssigneesInpu
 }
 
 /**
- * Toggle assignee completion (OWNER can toggle any assignee, MEMBER can only toggle themselves)
- * OPTIMIZED: Uses 3 API calls (UPDATE assignee, SELECT latest assignees, UPDATE task status)
- * Always fetches latest assignee states from DB to ensure accurate task status calculation
+ * Toggle assignee completion (OWNER can toggle any assignee, MEMBER can only toggle themselves).
+ * Reads current status from DB then toggles (avoids stale client state). Then syncs task status.
  * @param taskId - Task ID
  * @param assigneeId - User ID to toggle
- * @param currentStatus - Current completion status (from UI)
+ * @param _currentStatus - Ignored; we read from DB so client state cannot cause wrong toggle
  */
 export async function toggleAssigneeCompletion(
   taskId: string,
   assigneeId: string,
-  currentStatus?: boolean
+  _currentStatus?: boolean
 ): Promise<{ data: boolean | null; error: Error | null }> {
   try {
-    // Calculate new status
-    const newStatus = !currentStatus;
+    // 0) Read current status from DB (single source of truth; avoids stale UI)
+    const { data: currentRow, error: fetchErr } = await supabase
+      .from('task_assignees')
+      .select('is_completed')
+      .eq('task_id', taskId)
+      .eq('user_id', assigneeId)
+      .maybeSingle();
+
+    if (fetchErr || currentRow == null) {
+      console.error('🔴 [API toggleAssigneeCompletion] Assignee not found or error:', fetchErr);
+      return { data: null, error: fetchErr || new Error('Assignee not found') };
+    }
+
+    const newStatus = !(currentRow.is_completed === true);
     const completedAt = newStatus ? new Date().toISOString() : null;
 
-    // Update assignee completion (1 API call)
+    // 1) Update this assignee
     const { data: updateResult, error: updateError } = await supabase
       .from('task_assignees')
       .update({
@@ -782,8 +793,36 @@ export async function toggleAssigneeCompletion(
       return { data: null, error: new Error('Assignee not found') };
     }
 
-    return { data: true, error: null };
+    // 2) Sync task status: DONE only when all assignees are completed
+    const { data: assignees, error: fetchError } = await supabase
+      .from('task_assignees')
+      .select('is_completed')
+      .eq('task_id', taskId);
 
+    if (fetchError) {
+      console.error('🔴 [API toggleAssigneeCompletion] Error fetching assignees for task status:', fetchError);
+      return { data: null, error: fetchError };
+    }
+
+    const allCompleted =
+      Array.isArray(assignees) &&
+      assignees.length > 0 &&
+      assignees.every((a: { is_completed: boolean }) => a.is_completed);
+
+    const { error: taskUpdateError } = await supabase
+      .from('tasks')
+      .update({
+        status: allCompleted ? 'DONE' : 'TODO',
+        completed_at: allCompleted ? new Date().toISOString() : null,
+      })
+      .eq('id', taskId);
+
+    if (taskUpdateError) {
+      console.error('🔴 [API toggleAssigneeCompletion] Error syncing task status:', taskUpdateError);
+      return { data: null, error: taskUpdateError };
+    }
+
+    return { data: true, error: null };
   } catch (error) {
     console.error('[API toggleAssigneeCompletion] Exception:', error);
     return { data: null, error: error as Error };

@@ -1099,7 +1099,7 @@ function TaskItem({
         }
 
         try {
-          const { toggleAssigneeCompletion, getTaskById } = await import('@/lib/api/tasks');
+          const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
           const { error } = await toggleAssigneeCompletion(
             task.id,
             user.id,
@@ -1114,15 +1114,8 @@ function TaskItem({
               useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-          } else {
-            // Fetch updated task and update store with server response
-            const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
-            if (!fetchError && updatedTask) {
-              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
-              const tasksWithRollover = calculateRolloverInfo([updatedTask]);
-              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-            }
           }
+          // Success: keep optimistic update; no getTaskById merge (avoids late response overwriting)
         } catch (error) {
           console.error('Exception toggling assignee:', error);
           // Rollback on exception
@@ -1239,8 +1232,8 @@ function TaskItem({
                 <Pressable
                   onPress={handleCheckboxPress}
                   disabled={isCheckboxDisabled}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                  hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                  pressRetentionOffset={{ top: 22, bottom: 22, left: 22, right: 22 }}
                   style={[
                     {
                       width: 18,

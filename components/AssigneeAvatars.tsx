@@ -152,7 +152,7 @@ export function AssigneeAvatars({
     }
     
     try {
-      const { toggleAssigneeCompletion, getTaskById } = await import('@/lib/api/tasks');
+      const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
       const { error } = await toggleAssigneeCompletion(
         taskId,
         assignee.user_id,
@@ -170,39 +170,8 @@ export function AssigneeAvatars({
         queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
         queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
         queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-      } else {
-        // Fetch updated task and update store with server response
-        const { data: updatedTask, error: fetchError } = await getTaskById(taskId);
-        if (!fetchError && updatedTask) {
-          // Preserve assignees order from original task
-          const currentTask = useCalendarStore.getState().getTaskById(taskId);
-          if (currentTask && currentTask.assignees && updatedTask.assignees) {
-            // Create a map of assignees by user_id from server response
-            const serverAssigneesMap = new Map(
-              updatedTask.assignees.map((a: any) => [a.user_id, a])
-            );
-            
-            // Preserve original order, but update with server data
-            const preservedAssignees = currentTask.assignees.map((originalAssignee: any) => {
-              const serverAssignee = serverAssigneesMap.get(originalAssignee.user_id);
-              return serverAssignee || originalAssignee;
-            });
-            
-            // Add any new assignees from server (shouldn't happen, but just in case)
-            updatedTask.assignees.forEach((serverAssignee: any) => {
-              if (!currentTask.assignees.some((a: any) => a.user_id === serverAssignee.user_id)) {
-                preservedAssignees.push(serverAssignee);
-              }
-            });
-            
-            updatedTask.assignees = preservedAssignees;
-          }
-          
-          const { calculateRolloverInfo } = await import('@/lib/api/tasks');
-          const tasksWithRollover = calculateRolloverInfo([updatedTask]);
-          useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-        }
       }
+      // Success: keep optimistic update; no getTaskById merge (avoids late response overwriting)
     } catch (error) {
       console.error('Exception toggling assignee:', error);
       // Rollback on exception

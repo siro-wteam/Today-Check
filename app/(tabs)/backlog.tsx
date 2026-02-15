@@ -526,9 +526,9 @@ function BacklogItem({
                       opacity: 0.5, // Visual indicator for disabled state
                     },
                   ]}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                   delayPressIn={0}
-                  pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                  pressRetentionOffset={{ top: 22, bottom: 22, left: 22, right: 22 }}
                 >
                   {isDone && (
                     <Check size={10} color="#FFFFFF" strokeWidth={3} />

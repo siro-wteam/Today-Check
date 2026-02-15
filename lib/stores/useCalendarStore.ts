@@ -412,6 +412,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     
     tasksWithRollover.forEach(newTask => {
       const existingTask = taskMap.get(newTask.id);
+      // Don't overwrite with older data (e.g. out-of-order getTaskById after toggle)
+      const existingUpdated = existingTask && (existingTask as any).updated_at;
+      const newUpdated = (newTask as any).updated_at;
+      if (existingUpdated && newUpdated && newUpdated < existingUpdated) {
+        return;
+      }
       
       // Preserve assignees order from existing task if it exists
       if (existingTask && existingTask.assignees && newTask.assignees) {
