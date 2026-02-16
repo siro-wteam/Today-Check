@@ -26,77 +26,58 @@ export function groupTasksByDate(
   const today = startOfDay(new Date());
   const todayStr = format(today, 'yyyy-MM-dd');
   const tasksByDate = new Map<string, TaskWithOverdue[]>();
-  const overdueTasks: TaskWithOverdue[] = [];
 
-  // Single pass through tasks: O(m) where m = number of tasks
+  // Single pass: add each task to its bucket in iteration order (status-independent).
+  // So completing/uncompleting doesn't change "insertion order" before sort.
   tasks.forEach((task) => {
-    if (task.status === 'DONE') {
-      // DONE: Group by completion date
-      if (!task.completed_at) return;
-      
-      const completedDate = parseISO(task.completed_at);
-      const completedDateStr = format(completedDate, 'yyyy-MM-dd');
-      
-      if (!tasksByDate.has(completedDateStr)) {
-        tasksByDate.set(completedDateStr, []);
-      }
-      tasksByDate.get(completedDateStr)!.push(task);
-    } else {
-      // TODO or CANCEL: Group by due_date
-      if (!task.due_date) return;
+    let bucketKey: string | null = null;
+    let payload: TaskWithOverdue = task;
 
+    if (task.status === 'DONE') {
+      if (!task.completed_at) return;
+      bucketKey = format(parseISO(task.completed_at), 'yyyy-MM-dd');
+    } else {
+      if (!task.due_date) return;
       const taskDate = parseISO(task.due_date);
       const isTaskPast = taskDate < today;
-
       if (task.status === 'TODO' && isTaskPast) {
-        // Overdue TODO: Show ONLY in TODAY
-        const daysOverdue = differenceInCalendarDays(today, taskDate);
-        overdueTasks.push({
-          ...task,
-          isOverdue: true,
-          daysOverdue,
-        });
+        bucketKey = todayStr;
+        payload = { ...task, isOverdue: true, daysOverdue: differenceInCalendarDays(today, taskDate) };
       } else {
-        // Normal case: Show on due_date
-        if (!tasksByDate.has(task.due_date)) {
-          tasksByDate.set(task.due_date, []);
-        }
-        tasksByDate.get(task.due_date)!.push(task);
+        bucketKey = task.due_date;
       }
+    }
+
+    if (bucketKey) {
+      if (!tasksByDate.has(bucketKey)) tasksByDate.set(bucketKey, []);
+      tasksByDate.get(bucketKey)!.push(payload);
     }
   });
 
-  // Add overdue tasks to TODAY
-  if (overdueTasks.length > 0) {
-    if (!tasksByDate.has(todayStr)) {
-      tasksByDate.set(todayStr, []);
+  // Sort every date bucket with the same comparator (status-free).
+  // Tie-break by id so order is stable when keys are equal.
+  const sortByDateTimeOnly = (a: TaskWithOverdue, b: TaskWithOverdue) => {
+    const aDateStr = a.original_due_date || a.due_date || a.created_at;
+    const bDateStr = b.original_due_date || b.due_date || b.created_at;
+    const aDate = parseISO(aDateStr);
+    const bDate = parseISO(bDateStr);
+    const timeDiff = aDate.getTime() - bDate.getTime();
+    if (timeDiff !== 0) return timeDiff;
+    if (a.due_time && b.due_time) {
+      const t = a.due_time.localeCompare(b.due_time);
+      if (t !== 0) return t;
     }
-    const todayTasks = tasksByDate.get(todayStr)!;
-    todayTasks.push(...overdueTasks);
-    
-    // Sort TODAY tasks by original due_date, then by time
-    todayTasks.sort((a, b) => {
-      const aDateStr = a.original_due_date || a.due_date || a.created_at;
-      const bDateStr = b.original_due_date || b.due_date || b.created_at;
-      
-      const aDate = parseISO(aDateStr);
-      const bDate = parseISO(bDateStr);
-      
-      const timeDiff = aDate.getTime() - bDate.getTime();
-      if (timeDiff !== 0) return timeDiff;
-      
-      // If same date, sort by time
-      if (a.due_time && b.due_time) {
-        return a.due_time.localeCompare(b.due_time);
-      }
-      
-      // Finally by created_at (handle undefined)
-      if (!a.created_at && !b.created_at) return 0;
-      if (!a.created_at) return 1;
-      if (!b.created_at) return -1;
-      return a.created_at.localeCompare(b.created_at);
-    });
-  }
+    if (!a.created_at && !b.created_at) return 0;
+    if (!a.created_at) return 1;
+    if (!b.created_at) return -1;
+    const c = a.created_at.localeCompare(b.created_at);
+    if (c !== 0) return c;
+    return (a.id || '').localeCompare(b.id || '');
+  };
+
+  tasksByDate.forEach((bucket) => {
+    bucket.sort(sortByDateTimeOnly);
+  });
 
   return tasksByDate;
 }

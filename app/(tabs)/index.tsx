@@ -979,6 +979,8 @@ const DailyCard = React.memo(function DailyCard({
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
           } else {
+            if (shouldComplete) showToast('success', 'Well done!', '👏 Task completed.');
+            else showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
             // Fetch updated task and update store with server response
             const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
             if (!fetchError && updatedTask) {
@@ -1050,6 +1052,11 @@ const DailyCard = React.memo(function DailyCard({
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
 
+        const updatedAssigneesForToast = originalTask?.assignees?.map((a: any) =>
+          a.user_id === user.id ? { ...a, is_completed: shouldCompleteMyTask } : a
+        ) ?? [];
+        const taskBecameFullComplete = updatedAssigneesForToast.length > 0 && updatedAssigneesForToast.every((a: any) => a.is_completed);
+
         try {
           const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
           const { error } = await toggleAssigneeCompletion(
@@ -1066,6 +1073,10 @@ const DailyCard = React.memo(function DailyCard({
               useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          } else if (taskBecameFullComplete) {
+            showToast('success', 'Well done!', '👏 Task completed.');
+          } else if (!shouldCompleteMyTask && task.status === 'DONE') {
+            showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
           }
           // Success: keep optimistic update; no getTaskById merge (avoids late response overwriting)
         } catch (error) {
@@ -1102,6 +1113,8 @@ const DailyCard = React.memo(function DailyCard({
     }
     
     await updateTaskInStore(task.id, updates);
+    if (newStatus === 'DONE') showToast('success', 'Well done!', '👏 Task completed.');
+    else if (task.status === 'DONE') showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
   };
   
   // Memoize isLateCompletion calculation helper

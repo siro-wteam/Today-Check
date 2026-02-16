@@ -1027,6 +1027,8 @@ function TaskItem({
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
           } else {
+            if (shouldComplete) showToast('success', 'Well done!', '👏 Task completed.');
+            else showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
             // Fetch updated task and update store with server response
             const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
             if (!fetchError && updatedTask) {
@@ -1098,6 +1100,11 @@ function TaskItem({
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
 
+        const assigneesAfterToggle = originalTask?.assignees?.map((a: any) =>
+          a.user_id === user.id ? { ...a, is_completed: shouldCompleteMyTask } : a
+        ) ?? [];
+        const taskBecameFullComplete = assigneesAfterToggle.length > 0 && assigneesAfterToggle.every((a: any) => a.is_completed);
+
         try {
           const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
           const { error } = await toggleAssigneeCompletion(
@@ -1114,6 +1121,10 @@ function TaskItem({
               useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          } else if (taskBecameFullComplete) {
+            showToast('success', 'Well done!', '👏 Task completed.');
+          } else if (!shouldCompleteMyTask && task.status === 'DONE') {
+            showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
           }
           // Success: keep optimistic update; no getTaskById merge (avoids late response overwriting)
         } catch (error) {
@@ -1151,6 +1162,8 @@ function TaskItem({
 
     // Use store function (handles optimistic update and API call)
     await updateTaskInStore(task.id, updates);
+    if (targetStatus === 'DONE') showToast('success', 'Well done!', '👏 Task completed.');
+    else if (task.status === 'DONE') showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
   };
 
   // Handle Checkbox Tap

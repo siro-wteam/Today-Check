@@ -295,8 +295,9 @@ function BacklogItem({
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
           } else {
+            if (newCompletionStatus) showToast('success', 'Well done!', '👏 Task completed.');
+            else showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
             // Success: Invalidate to sync with server state
-            // This ensures the UI reflects the actual server state after refresh
             queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
@@ -372,6 +373,13 @@ function BacklogItem({
             queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+          } else {
+            const assigneesAfterToggle = task.assignees?.map((a: any) =>
+              a.user_id === user.id ? { ...a, is_completed: newCompletionStatus } : a
+            ) ?? [];
+            const taskBecameFullComplete = assigneesAfterToggle.length > 0 && assigneesAfterToggle.every((a: any) => a.is_completed);
+            if (taskBecameFullComplete) showToast('success', 'Well done!', '👏 Task completed.');
+            else if (!newCompletionStatus && task.status === 'DONE') showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
           }
           // Success: keep optimistic update, no invalidation needed
         } catch (error) {
@@ -429,7 +437,9 @@ function BacklogItem({
       
       // Success: keep optimistic update, no invalidation needed
       if (newStatus === 'DONE') {
-        showToast('success', 'Completed', 'Moved to today\'s completed list');
+        showToast('success', 'Well done!', '👏 Task completed.');
+      } else if (task.status === 'DONE') {
+        showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
       } else if (newStatus === 'TODO' && !task.due_date) {
         showToast('success', 'Scheduled', 'Scheduled for today');
       }
