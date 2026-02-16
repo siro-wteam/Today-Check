@@ -31,6 +31,8 @@ Metro 없이 **APK 한 번 설치해서** 실기기/에뮬레이터에서 동작
 
 ## 2. Release APK 빌드 (번들 포함, Metro 불필요)
 
+### 방법 A: npm 스크립트 (기기/에뮬레이터 연결 시)
+
 프로젝트 루트에서:
 
 ```bash
@@ -44,9 +46,21 @@ npx expo run:android --variant release
 ```
 
 - **에뮬레이터/기기 선택**: 실행 시 연결된 기기나 에뮬레이터를 고르라는 메뉴가 나오면 원하는 것을 선택.
-- **기기 없이 APK만 만들기**: 기기가 없어도 빌드는 됩니다. 끝나면 아래 경로에 APK가 생성됩니다.
+- 기기가 없으면 adb 오류(`no devices/emulators found` 등)로 **실패할 수 있습니다**. 그럴 때는 **방법 B**를 쓰세요.
 
-**APK 위치:**
+### 방법 B: Gradle만 사용 (기기 없이 APK만 만들기)
+
+에뮬레이터/기기를 연결하지 않았거나, `npm run android:apk` 실행 시 adb 오류가 나면 아래처럼 **Gradle로만** 빌드하면 됩니다.
+
+```bash
+cd android
+./gradlew assembleRelease
+```
+
+- **처음 빌드**는 5~10분 정도 걸릴 수 있습니다 (Gradle 다운로드, 네이티브 컴파일, JS 번들 생성 포함).
+- 끝나면 같은 경로에 APK가 생성됩니다.
+
+**APK 위치 (방법 A·B 동일):**
 
 ```
 android/app/build/outputs/apk/release/app-release.apk
