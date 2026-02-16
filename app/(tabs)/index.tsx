@@ -18,10 +18,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { duplicateTasksToNextWeek } from '@/lib/api/tasks';
-import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Repeat, Users } from 'lucide-react-native';
+import { duplicateTasksToNextWeek, moveTaskToBacklog } from '@/lib/api/tasks';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Repeat, Trash2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -1238,10 +1239,73 @@ const DailyCard = React.memo(function DailyCard({
               // Use memoized calculation
               const isLateCompletion = calculateLateCompletion(task);
               
+              // Swipe actions: Move to Backlog + Delete
+              // Note: Permissions are checked by RLS on the server
+              const renderRightActions = () => (
+                <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 2, marginBottom: index < visibleTasks.length - 1 ? 8 : 0 }}>
+                  <Pressable
+                    onPress={async () => {
+                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      
+                      // Optimistically remove from UI
+                      await updateTaskInStore(task.id, { due_date: null });
+                      
+                      const { error } = await moveTaskToBacklog(task.id);
+                      if (error) {
+                        const errorMsg = error.message?.includes('permission') || error.code === '42501'
+                          ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
+                          : 'Could not move to backlog';
+                        showToast('error', 'Failed', errorMsg);
+                        // Rollback by invalidating
+                        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                      } else {
+                        showToast('success', 'Moved', 'Task moved to backlog');
+                        queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+                      }
+                    }}
+                    style={{
+                      backgroundColor: '#3B82F6',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      width: 60,
+                      alignSelf: 'stretch',
+                      borderTopLeftRadius: borderRadius.lg,
+                      borderBottomLeftRadius: borderRadius.lg,
+                    }}
+                  >
+                    <Archive size={18} color="#FFFFFF" strokeWidth={2} />
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      await deleteTaskInStore(task.id);
+                    }}
+                    style={{
+                      backgroundColor: colors.error,
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      width: 60,
+                      alignSelf: 'stretch',
+                      borderTopRightRadius: borderRadius.lg,
+                      borderBottomRightRadius: borderRadius.lg,
+                    }}
+                  >
+                    <Trash2 size={18} color="#FFFFFF" strokeWidth={2} />
+                  </Pressable>
+                </View>
+              );
+              
               return (
-                <View
+                <Swipeable
                   key={task.id}
-                  style={[
+                  renderRightActions={renderRightActions}
+                  overshootRight={false}
+                  overshootLeft={false}
+                  friction={2}
+                  rightThreshold={40}
+                >
+                  <View
+                    style={[
                     {
                       borderRadius: borderRadius.lg,
                       marginBottom: index < visibleTasks.length - 1 ? 8 : 0,
@@ -1377,6 +1441,7 @@ const DailyCard = React.memo(function DailyCard({
                     </View>
                   </View>
                 </View>
+                </Swipeable>
               );
             })}
             

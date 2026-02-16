@@ -230,7 +230,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
             return oldData.map((t: any) => t.id === taskId ? task : t);
           }
         );
-        showToast('error', '업데이트 실패', result.error.message || '작업을 업데이트할 수 없습니다.');
+        const isPermissionError = result.error.message?.includes('permission') || result.error.code === '42501';
+        const errorMsg = isPermissionError 
+          ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
+          : result.error.message || '작업을 업데이트할 수 없습니다.';
+        showToast('error', '업데이트 실패', errorMsg);
         return { success: false, error: result.error.message };
       }
       
@@ -306,7 +310,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       if (result.error) {
         // Rollback on error
         set({ tasks: tasksBeforeDelete });
-        showToast('error', '삭제 실패', result.error.message || '작업을 삭제할 수 없습니다.');
+        const isPermissionError = result.error.message?.includes('permission') || result.error.code === '42501';
+        const errorMsg = isPermissionError 
+          ? 'Permission denied. Only OWNER/ADMIN can delete this task.'
+          : result.error.message || '작업을 삭제할 수 없습니다.';
+        showToast('error', '삭제 실패', errorMsg);
         return { success: false, error: result.error.message };
       }
 

@@ -13,9 +13,10 @@ import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Check, Clock, Package, Users } from 'lucide-react-native';
+import { CalendarCheck, Check, Clock, Package, Trash2, Users } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { showToast } from '@/utils/toast';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -483,8 +484,154 @@ function BacklogItem({
   const isCancelled = task.status === 'CANCEL';
   const isTodo = task.status === 'TODO';
 
+  // Schedule for today - set due_date to today
+  const handleScheduleForToday = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
+    const today = format(new Date(), 'yyyy-MM-dd');
+
+    // Optimistic update: Remove from backlog query
+    const optimisticUpdate = (oldData: any) => {
+      if (!oldData) return oldData;
+      
+      if (Array.isArray(oldData)) {
+        return oldData.filter((t: any) => t.id !== task.id);
+      }
+      
+      if (oldData.data && Array.isArray(oldData.data)) {
+        return {
+          ...oldData,
+          data: oldData.data.filter((t: any) => t.id !== task.id),
+        };
+      }
+      
+      return oldData;
+    };
+
+    queryClient.setQueriesData(
+      { queryKey: ['tasks', 'backlog'] },
+      optimisticUpdate
+    );
+
+    // Optimistically add to calendar store
+    const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+    const updatedTask = { ...task, due_date: today };
+    useCalendarStore.getState().mergeTasksIntoStore([updatedTask]);
+
+    try {
+      const { error } = await updateTask({ 
+        id: task.id, 
+        due_date: today 
+      });
+      if (error) {
+        const errorMsg = error.message?.includes('permission') || error.code === '42501'
+          ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
+          : 'Could not schedule task';
+        // Rollback
+        queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+        queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+        showToast('error', 'Failed', errorMsg);
+      } else {
+        showToast('success', 'Scheduled', 'Task scheduled for today');
+        queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+      }
+    } catch (error) {
+      // Rollback
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+    }
+  };
+
+  // Delete task
+  const handleDelete = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
+    // Optimistic update
+    const optimisticUpdate = (oldData: any) => {
+      if (!oldData) return oldData;
+      
+      if (Array.isArray(oldData)) {
+        return oldData.filter((t: any) => t.id !== task.id);
+      }
+      
+      if (oldData.data && Array.isArray(oldData.data)) {
+        return {
+          ...oldData,
+          data: oldData.data.filter((t: any) => t.id !== task.id),
+        };
+      }
+      
+      return oldData;
+    };
+
+    queryClient.setQueriesData(
+      { queryKey: ['tasks', 'backlog'] },
+      optimisticUpdate
+    );
+
+    try {
+      const { error: deleteError } = await deleteTask(task.id);
+      if (deleteError) {
+        const errorMsg = deleteError.message?.includes('permission') || deleteError.code === '42501'
+          ? 'Permission denied. Only OWNER/ADMIN can delete this task.'
+          : 'Could not delete task';
+        queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+        showToast('error', 'Failed', errorMsg);
+      } else {
+        showToast('success', 'Deleted', 'Task deleted');
+        queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+      showToast('error', 'Failed', 'Could not delete task');
+    }
+  };
+
+  // Swipe actions: Schedule for Today + Delete
+  // Note: Permissions are checked by RLS on the server
+  const renderRightActions = () => (
+    <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 2, marginBottom: 12 }}>
+      <Pressable
+        onPress={handleScheduleForToday}
+        style={{
+          backgroundColor: '#3B82F6',
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: 60,
+          alignSelf: 'stretch',
+          borderTopLeftRadius: borderRadius.lg,
+          borderBottomLeftRadius: borderRadius.lg,
+        }}
+      >
+        <CalendarCheck size={18} color="#FFFFFF" strokeWidth={2} />
+      </Pressable>
+      <Pressable
+        onPress={handleDelete}
+        style={{
+          backgroundColor: colors.error,
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: 60,
+          alignSelf: 'stretch',
+          borderTopRightRadius: borderRadius.lg,
+          borderBottomRightRadius: borderRadius.lg,
+        }}
+      >
+        <Trash2 size={18} color="#FFFFFF" strokeWidth={2} />
+      </Pressable>
+    </View>
+  );
+
   return (
     <>
+    <Swipeable
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      overshootLeft={false}
+      friction={2}
+      rightThreshold={40}
+    >
       <View
         style={[
           styles.card,
@@ -692,6 +839,7 @@ function BacklogItem({
           </View>
         </View>
       </View>
+    </Swipeable>
 
       {/* Edit Task Bottom Sheet */}
       <EditTaskBottomSheet

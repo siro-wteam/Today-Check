@@ -20,10 +20,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Trash2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 // TaskWithOverdue is imported from task-filtering.ts
@@ -1220,19 +1220,69 @@ function TaskItem({
     
     if (result.success) {
       showToast('success', 'Moved', 'Task moved to Backlog');
+    } else if (result.error) {
+      const errorMsg = result.error.message?.includes('permission') || result.error.code === '42501'
+        ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
+        : 'Could not move to backlog';
+      showToast('error', 'Failed', errorMsg);
     }
   };
+
+  // Swipe actions: Move to Backlog + Delete
+  // Note: Permissions are checked by RLS on the server
+  const renderRightActions = () => (
+    <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 2, marginBottom: spacing.md }}>
+      <Pressable
+        onPress={handleSendToBacklog}
+        style={{
+          backgroundColor: '#3B82F6',
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: 60,
+          alignSelf: 'stretch',
+          borderTopLeftRadius: borderRadius.lg,
+          borderBottomLeftRadius: borderRadius.lg,
+        }}
+      >
+        <Archive size={18} color="#FFFFFF" strokeWidth={2} />
+      </Pressable>
+      <Pressable
+        onPress={async () => {
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          await deleteTaskInStore(task.id);
+        }}
+        style={{
+          backgroundColor: colors.error,
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: 60,
+          alignSelf: 'stretch',
+          borderTopRightRadius: borderRadius.lg,
+          borderBottomRightRadius: borderRadius.lg,
+        }}
+      >
+        <Trash2 size={18} color="#FFFFFF" strokeWidth={2} />
+      </Pressable>
+    </View>
+  );
 
   // Render task item
   return (
     <>
-    <View
-      style={[
-        styles.card as any,
-        isOverdue && isTodo && (styles.cardOverdue as any),
-        isDone && { backgroundColor: '#F8FAFC' }, // Completed task background
-      ]}
+    <Swipeable
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      overshootLeft={false}
+      friction={2}
+      rightThreshold={40}
     >
+      <View
+        style={[
+          styles.card as any,
+          isOverdue && isTodo && (styles.cardOverdue as any),
+          isDone && { backgroundColor: '#F8FAFC' }, // Completed task background
+        ]}
+      >
       <View style={{ flex: 1, paddingHorizontal: 12, paddingVertical: 12 }}>
           {/* 첫 번째 줄: 체크박스 + 제목 + 시간뱃지 + delay뱃지 */}
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
@@ -1440,6 +1490,7 @@ function TaskItem({
           </View>
         </View>
       </View>
+    </Swipeable>
     
     {/* Edit Task Bottom Sheet */}
     <EditTaskBottomSheet
