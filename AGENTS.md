@@ -7,7 +7,7 @@
 
 ## 🎯 Project Context
 
-**TodayCheck** is a personal and group task management app with the philosophy: **"Simple like a To-do list, but managed like Jira"**.
+**TodayCheck** is a personal and group task management app with the philosophy: **"Simple like a To-do list, managed like pro"**.
 
 - **Platform**: Cross-platform mobile app (iOS, Android, Web)
 - **Framework**: Expo (Managed Workflow) + React Native
@@ -552,7 +552,7 @@ docs: update AGENTS.md with code style guidelines
 
 ### **15. Cursor/Copilot Rules** (from `.cursorrules`)
 
-**Core Philosophy**: "Simple like a To-do list, but managed like Jira"
+**Core Philosophy**: "Simple like a To-do list, managed like pro"
 
 **Tech Stack**:
 - Expo (Managed Workflow), Expo Router (File-based routing)

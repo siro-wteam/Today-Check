@@ -104,7 +104,7 @@ export default function AuthScreen() {
             Today-Check
           </Text>
           <Text className="text-lg text-gray-600 dark:text-gray-400">
-            Simple like a To-do list, but managed like Jira
+            Simple like a To-do list, managed like pro
           </Text>
         </View>
 

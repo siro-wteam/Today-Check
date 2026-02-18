@@ -2,7 +2,7 @@
 
 ## 📋 프로젝트 개요
 
-**TodayCheck**는 "Simple like a To-do list, but managed like Jira" 컨셉의 개인 및 그룹 태스크 관리 애플리케이션입니다.
+**TodayCheck**는 "Simple like a To-do list, managed like pro" 컨셉의 개인 및 그룹 태스크 관리 애플리케이션입니다.
 
 - **타입**: 크로스 플랫폼 모바일 앱 (iOS, Android, Web)
 - **주요 기능**: Timeline View, Ghost Task, Backlog 관리, 그룹 태스크 협업

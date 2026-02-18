@@ -1,6 +1,6 @@
 # TodayCheck 📅
 
-> **Simple like a To-do list, but managed like Jira**
+> **Simple like a To-do list, managed like pro**
 
 A personal task management app with **Timeline View** and **Ghost Task** retrospective capabilities. Built with Expo, React Native, and Supabase.
 

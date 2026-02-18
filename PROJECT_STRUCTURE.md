@@ -1,6 +1,6 @@
 # TodayCheck 프로젝트 구조
 
-> **Simple like a To-do list, but managed like Jira**  
+> **Simple like a To-do list, managed like pro**  
 > Expo + React Native + Supabase 기반 개인/그룹 태스크 관리 앱
 
 ---

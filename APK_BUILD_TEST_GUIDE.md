@@ -20,6 +20,26 @@ Metro 없이 **APK 한 번 설치해서** 실기기/에뮬레이터에서 동작
 
 ---
 
+## 0. 스플래시 화면을 기기에서 확인하려면
+
+스플래시 이미지/배경색은 **네이티브 빌드에 포함**됩니다. `app.json`을 바꾼 뒤에는 아래 순서로 하면 기기에서 새 스플래시가 보입니다.
+
+1. **네이티브 프로젝트 다시 생성** (새 스플래시 반영)
+   ```bash
+   npx expo prebuild --clean --platform android
+   ```
+2. **Release APK 빌드** (아래 "2. Release APK 빌드" 참고)
+   ```bash
+   npx expo run:android --variant release
+   ```
+   또는 기기 없이: `cd android && ./gradlew assembleRelease`
+3. **APK 설치 후 앱 실행** → 앱 켜자마자 스플래시가 표시됩니다.
+
+- **Expo Go**에서는 `app.json` 스플래시가 적용되지 않을 수 있으므로, **직접 빌드한 APK** 또는 **개발 빌드**로 확인하는 것이 좋습니다.
+- **iOS**라면: `npx expo prebuild --clean --platform ios` 후 Xcode에서 실행하거나 Archive로 빌드하면 됩니다.
+
+---
+
 ## 1. 준비 (한 번만)
 
 - **Android SDK**: [ANDROID_DEVICE_BUILD.md](./ANDROID_DEVICE_BUILD.md)의 “1. 준비”처럼 `ANDROID_HOME` 설정 및 `android/local.properties` 확인.
