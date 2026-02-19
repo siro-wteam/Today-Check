@@ -509,6 +509,8 @@ export default function WeekScreen() {
     weekRightValue = `${todayCompleted}/${todayTotal} completed`;
     progressPercent = 0;
   }
+
+  const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
   
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
@@ -520,6 +522,8 @@ export default function WeekScreen() {
         onClose={() => setIsNotificationModalVisible(false)}
       />
       
+      {/* 상단 영역: 테스크 영역과 동일한 가로 폭(pageWidth + padding 16) */}
+      <View style={[ { width: pageWidth, alignSelf: 'center' as const }, Platform.OS === 'web' && { maxWidth: 600 } ]}>
       {/* Week Progress Card - 이번주: Today+%+바 / 지난주·미래주: 왼쪽 Week completed|scheduled, 오른쪽 Today's Progress */}
       <View 
         style={[
@@ -534,7 +538,6 @@ export default function WeekScreen() {
             minHeight: 104,
             ...shadows.sm,
           },
-          Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center', marginHorizontal: 'auto' as any },
         ]}
       >
         {isCurrentWeek ? (
@@ -612,18 +615,15 @@ export default function WeekScreen() {
         )}
       </View>
       
-      {/* Week Navigator - no separate background (match V0) */}
+      {/* Week Navigator - 테스크 영역과 동일 가로 여백 */}
       <View 
-        style={[
-          {
-            backgroundColor: colors.background,
-            paddingHorizontal: 24,
-            paddingVertical: 14,
-            borderBottomWidth: 1,
-            borderBottomColor: colors.borderLight,
-          },
-          Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' },
-        ]}
+        style={{
+          backgroundColor: colors.background,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.borderLight,
+        }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ flex: 1 }} />
@@ -665,6 +665,7 @@ export default function WeekScreen() {
             )}
           </View>
         </View>
+      </View>
       </View>
       
       {/* Horizontal Week Paging View (or skeleton while loading) */}

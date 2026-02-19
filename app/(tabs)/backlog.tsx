@@ -25,6 +25,7 @@ const SCREEN_HEIGHT = Dimensions.get('window').height;
 const HEADER_HEIGHT = 60;
 const TITLE_BAR_HEIGHT = 90;
 const AVAILABLE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - TITLE_BAR_HEIGHT;
+const PAGE_WIDTH = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
 
 export default function BacklogScreen() {
   const { tasks, isLoading, isError, error, refetch } = useBacklogTasks();
@@ -94,34 +95,33 @@ export default function BacklogScreen() {
         onClose={() => setIsNotificationModalVisible(false)}
       />
 
-      {/* Section Header */}
-      <View 
-        style={[
-          styles.sectionHeader,
-          Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' }
-        ]}
-      >
+      {/* 상단 영역: 테스크 리스트와 동일한 가로 폭 */}
+      <View style={{ width: PAGE_WIDTH, alignSelf: 'center' as const }}>
+      {/* Section Header - 주간뷰와 동일 블루 배경 */}
+      <View style={styles.sectionHeader}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Package size={20} color={colors.textSub} strokeWidth={2} />
+          <Package size={20} color={colors.primaryForeground} strokeWidth={2} />
           <Text style={styles.sectionTitle}>
             No Due Date
           </Text>
           {tasks.filter(t => t.status === 'TODO').length > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>
+            <View style={styles.sectionHeaderBadge}>
+              <Text style={styles.sectionHeaderBadgeText}>
                 {tasks.filter(t => t.status === 'TODO').length}
               </Text>
             </View>
           )}
         </View>
       </View>
+      </View>
 
-      {/* Backlog List */}
+      {/* Backlog List - 테스크 영역과 동일 가로 폭 */}
       <View 
         style={{
           flex: 1,
+          width: PAGE_WIDTH,
+          alignSelf: 'center',
           height: Platform.OS === 'web' ? AVAILABLE_HEIGHT : undefined,
-          ...(Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' }),
         }}
       >
         {tasks.length === 0 ? (
@@ -874,18 +874,32 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' && { height: '100vh' }),
   },
   sectionHeader: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.primary,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 10,
     paddingHorizontal: 16,
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: `${colors.border}80`, // 50% opacity
+    borderRadius: borderRadius.xl,
     justifyContent: 'center',
     alignItems: 'center',
+    ...shadows.sm,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.textMain,
+    color: colors.primaryForeground,
+  },
+  sectionHeaderBadge: {
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  sectionHeaderBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryForeground,
   },
   badge: {
     borderRadius: borderRadius.full,
