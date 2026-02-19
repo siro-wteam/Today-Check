@@ -3,6 +3,7 @@ import { AddTaskModal } from '@/components/AddTaskModal';
 import { AssigneeAvatars } from '@/components/AssigneeAvatars';
 import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { TaskListSkeleton } from '@/components/TaskListSkeleton';
 import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { getWeeklyCalendarRanges, isDateInWeeklyRange } from '@/constants/calendar';
 import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
@@ -20,9 +21,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Trash2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
+import { BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
@@ -761,11 +762,8 @@ export default function HomeScreen() {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container as any}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.textSub as any, { marginTop: 16 }]}>
-            Loading tasks...
-          </Text>
+        <View style={{ flex: 1 }}>
+          <TaskListSkeleton />
         </View>
       </SafeAreaView>
     );
@@ -1228,24 +1226,40 @@ function TaskItem({
     }
   };
 
-  // Swipe actions: Move to Backlog + Delete
-  // Note: Permissions are checked by RLS on the server
+  // Swipe actions: Completed → 미완료 / Not completed → Backlog | Delete
   const renderRightActions = () => (
     <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 2, marginBottom: spacing.md }}>
-      <Pressable
-        onPress={handleSendToBacklog}
-        style={{
-          backgroundColor: '#3B82F6',
-          justifyContent: 'center',
-          alignItems: 'center',
-          width: 60,
-          alignSelf: 'stretch',
-          borderTopLeftRadius: borderRadius.lg,
-          borderBottomLeftRadius: borderRadius.lg,
-        }}
-      >
-        <Archive size={18} color="#FFFFFF" strokeWidth={2} />
-      </Pressable>
+      {isDone ? (
+        <Pressable
+          onPress={() => changeStatus('TODO')}
+          style={{
+            backgroundColor: '#64748B',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: 60,
+            alignSelf: 'stretch',
+            borderTopLeftRadius: borderRadius.lg,
+            borderBottomLeftRadius: borderRadius.lg,
+          }}
+        >
+          <Undo2 size={18} color="#FFFFFF" strokeWidth={2} />
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={handleSendToBacklog}
+          style={{
+            backgroundColor: '#3B82F6',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: 60,
+            alignSelf: 'stretch',
+            borderTopLeftRadius: borderRadius.lg,
+            borderBottomLeftRadius: borderRadius.lg,
+          }}
+        >
+          <Archive size={18} color="#FFFFFF" strokeWidth={2} />
+        </Pressable>
+      )}
       <Pressable
         onPress={async () => {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

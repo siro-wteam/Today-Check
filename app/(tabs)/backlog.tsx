@@ -3,6 +3,7 @@ import { AssigneeAvatars } from '@/components/AssigneeAvatars';
 import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { NotificationCenterModal } from '@/components/NotificationCenterModal';
+import { TaskListSkeleton } from '@/components/TaskListSkeleton';
 import { borderRadius, colors, shadows } from '@/constants/colors';
 import { deleteTask, updateTask } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
@@ -13,9 +14,9 @@ import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { CalendarCheck, Check, Clock, Package, Trash2, Users } from 'lucide-react-native';
+import { CalendarCheck, Check, Clock, Package, Trash2, Undo2, Users } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { showToast } from '@/utils/toast';
 
@@ -51,11 +52,8 @@ export default function BacklogScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <AppHeader onNotificationPress={handleNotificationPress} />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.textSub, { marginTop: 16 }]}>
-            Loading backlog...
-          </Text>
+        <View style={{ flex: 1 }}>
+          <TaskListSkeleton />
         </View>
       </SafeAreaView>
     );
@@ -588,24 +586,40 @@ function BacklogItem({
     }
   };
 
-  // Swipe actions: Schedule for Today + Delete
-  // Note: Permissions are checked by RLS on the server
+  // Swipe actions: Completed → 미완료 / Not completed → Schedule for Today | Delete
   const renderRightActions = () => (
     <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 2, marginBottom: 12 }}>
-      <Pressable
-        onPress={handleScheduleForToday}
-        style={{
-          backgroundColor: '#3B82F6',
-          justifyContent: 'center',
-          alignItems: 'center',
-          width: 60,
-          alignSelf: 'stretch',
-          borderTopLeftRadius: borderRadius.lg,
-          borderBottomLeftRadius: borderRadius.lg,
-        }}
-      >
-        <CalendarCheck size={18} color="#FFFFFF" strokeWidth={2} />
-      </Pressable>
+      {isDone ? (
+        <Pressable
+          onPress={handleToggleComplete}
+          style={{
+            backgroundColor: '#64748B',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: 60,
+            alignSelf: 'stretch',
+            borderTopLeftRadius: borderRadius.lg,
+            borderBottomLeftRadius: borderRadius.lg,
+          }}
+        >
+          <Undo2 size={18} color="#FFFFFF" strokeWidth={2} />
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={handleScheduleForToday}
+          style={{
+            backgroundColor: '#3B82F6',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: 60,
+            alignSelf: 'stretch',
+            borderTopLeftRadius: borderRadius.lg,
+            borderBottomLeftRadius: borderRadius.lg,
+          }}
+        >
+          <CalendarCheck size={18} color="#FFFFFF" strokeWidth={2} />
+        </Pressable>
+      )}
       <Pressable
         onPress={handleDelete}
         style={{

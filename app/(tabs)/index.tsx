@@ -3,6 +3,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AssigneeAvatars } from '@/components/AssigneeAvatars';
 import { EditTaskBottomSheet } from '@/components/EditTaskBottomSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { TaskListSkeleton } from '@/components/TaskListSkeleton';
 import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { getWeeklyCalendarRanges, isDateInWeeklyRange } from '@/constants/calendar';
 import { borderRadius, colors, shadows } from '@/constants/colors';
@@ -19,7 +20,7 @@ import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, forma
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { duplicateTasksToNextWeek, moveTaskToBacklog } from '@/lib/api/tasks';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Repeat, Trash2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Repeat, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -666,7 +667,7 @@ export default function WeekScreen() {
         </View>
       </View>
       
-      {/* Horizontal Week Paging View */}
+      {/* Horizontal Week Paging View (or skeleton while loading) */}
       <View 
         style={{
           flex: 1,
@@ -674,6 +675,11 @@ export default function WeekScreen() {
           ...(Platform.OS === 'web' && { maxWidth: 600, width: '100%', alignSelf: 'center' }),
         }}
       >
+        {isLoading ? (
+          <View style={{ flex: 1 }}>
+            <TaskListSkeleton />
+          </View>
+        ) : (
         <FlatList
           ref={flatListRef}
           data={weekPages}
@@ -705,6 +711,7 @@ export default function WeekScreen() {
           removeClippedSubviews={Platform.OS !== 'web'}
           updateCellsBatchingPeriod={50}
         />
+        )}
       </View>
       
       {/* Add Task Modal */}
@@ -1239,42 +1246,54 @@ const DailyCard = React.memo(function DailyCard({
               // Use memoized calculation
               const isLateCompletion = calculateLateCompletion(task);
               
-              // Swipe actions: Move to Backlog + Delete
-              // Note: Permissions are checked by RLS on the server
+              // Swipe actions: Completed → 미완료 / Not completed → Backlog | Delete
               const renderRightActions = () => (
                 <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 2, marginBottom: index < visibleTasks.length - 1 ? 8 : 0 }}>
-                  <Pressable
-                    onPress={async () => {
-                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      
-                      // Optimistically remove from UI
-                      await updateTaskInStore(task.id, { due_date: null });
-                      
-                      const { error } = await moveTaskToBacklog(task.id);
-                      if (error) {
-                        const errorMsg = error.message?.includes('permission') || error.code === '42501'
-                          ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
-                          : 'Could not move to backlog';
-                        showToast('error', 'Failed', errorMsg);
-                        // Rollback by invalidating
-                        queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                      } else {
-                        showToast('success', 'Moved', 'Task moved to backlog');
-                        queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-                      }
-                    }}
-                    style={{
-                      backgroundColor: '#3B82F6',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      width: 60,
-                      alignSelf: 'stretch',
-                      borderTopLeftRadius: borderRadius.lg,
-                      borderBottomLeftRadius: borderRadius.lg,
-                    }}
-                  >
-                    <Archive size={18} color="#FFFFFF" strokeWidth={2} />
-                  </Pressable>
+                  {isDone ? (
+                    <Pressable
+                      onPress={() => handleToggleComplete(task)}
+                      style={{
+                        backgroundColor: '#64748B',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        width: 60,
+                        alignSelf: 'stretch',
+                        borderTopLeftRadius: borderRadius.lg,
+                        borderBottomLeftRadius: borderRadius.lg,
+                      }}
+                    >
+                      <Undo2 size={18} color="#FFFFFF" strokeWidth={2} />
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      onPress={async () => {
+                        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        await updateTaskInStore(task.id, { due_date: null });
+                        const { error } = await moveTaskToBacklog(task.id);
+                        if (error) {
+                          const errorMsg = error.message?.includes('permission') || error.code === '42501'
+                            ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
+                            : 'Could not move to backlog';
+                          showToast('error', 'Failed', errorMsg);
+                          queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                        } else {
+                          showToast('success', 'Moved', 'Task moved to backlog');
+                          queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+                        }
+                      }}
+                      style={{
+                        backgroundColor: '#3B82F6',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        width: 60,
+                        alignSelf: 'stretch',
+                        borderTopLeftRadius: borderRadius.lg,
+                        borderBottomLeftRadius: borderRadius.lg,
+                      }}
+                    >
+                      <Archive size={18} color="#FFFFFF" strokeWidth={2} />
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={async () => {
                       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
