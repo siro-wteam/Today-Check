@@ -552,7 +552,7 @@ export default function WeekScreen() {
                 style={{
                   width: 64,
                   height: 64,
-                  borderRadius: 32,
+                  borderRadius: borderRadius.full,
                   backgroundColor: 'rgba(255, 255, 255, 0.25)',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -1253,7 +1253,7 @@ const DailyCard = React.memo(function DailyCard({
                     <Pressable
                       onPress={() => handleToggleComplete(task)}
                       style={{
-                        backgroundColor: '#64748B',
+                        backgroundColor: colors.gray500,
                         justifyContent: 'center',
                         alignItems: 'center',
                         width: 60,
@@ -1431,9 +1431,9 @@ const DailyCard = React.memo(function DailyCard({
                       {task.group_id && (() => {
                         const groupName = groupsMap.get(task.group_id)?.name;
                         return groupName ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0, maxWidth: 100 }}>
-                            <Users size={10} color="#64748B" strokeWidth={2} />
-                            <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
+                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.gray100, paddingHorizontal: 6, paddingVertical: 2, borderRadius: borderRadius.sm, flexShrink: 0, maxWidth: 100 }}>
+                            <Users size={10} color={colors.textSub} strokeWidth={2} />
+                            <Text style={{ fontSize: 10, fontWeight: '500', color: colors.textSub, marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
                               {String(groupName)}
                             </Text>
                           </View>
@@ -1441,18 +1441,18 @@ const DailyCard = React.memo(function DailyCard({
                       })()}
                       
                       {(task.due_time || task.due_time_end) && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
-                          <Clock size={10} color="#64748B" strokeWidth={2} />
-                          <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.gray100, paddingHorizontal: 6, paddingVertical: 2, borderRadius: borderRadius.sm, flexShrink: 0 }}>
+                          <Clock size={10} color={colors.textSub} strokeWidth={2} />
+                          <Text style={{ fontSize: 10, fontWeight: '500', color: colors.textSub, marginLeft: 2 }}>
                             {String(formatTimeRange(task.due_time, task.due_time_end ?? null) || '')}
                           </Text>
                         </View>
                       )}
                       
                       {!task.due_date && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 }}>
-                          <Package size={10} color="#64748B" strokeWidth={2} />
-                          <Text style={{ fontSize: 10, fontWeight: '500', color: '#64748B', marginLeft: 2 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.gray100, paddingHorizontal: 6, paddingVertical: 2, borderRadius: borderRadius.sm, flexShrink: 0 }}>
+                          <Package size={10} color={colors.textSub} strokeWidth={2} />
+                          <Text style={{ fontSize: 10, fontWeight: '500', color: colors.textSub, marginLeft: 2 }}>
                             Backlog
                           </Text>
                         </View>

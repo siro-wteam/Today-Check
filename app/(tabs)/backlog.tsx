@@ -753,10 +753,10 @@ function BacklogItem({
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  backgroundColor: '#F1F5F9', // Slate 100
+                  backgroundColor: colors.gray100,
                   paddingHorizontal: 6,
                   paddingVertical: 4,
-                  borderRadius: 6,
+                  borderRadius: borderRadius.sm,
                   flexShrink: 0,
                 }}>
                   <Clock size={10} color="#475569" strokeWidth={2} />
@@ -788,10 +788,10 @@ function BacklogItem({
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  backgroundColor: '#F1F5F9', // Slate 100
+                  backgroundColor: colors.gray100,
                   paddingHorizontal: 6,
                   paddingVertical: 4,
-                  borderRadius: 6,
+                  borderRadius: borderRadius.sm,
                   flexShrink: 0,
                 }}>
                   <Users size={10} color="#475569" strokeWidth={2} />
@@ -833,10 +833,10 @@ function BacklogItem({
               <View style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                backgroundColor: '#F1F5F9', // Slate 100
+                backgroundColor: colors.gray100,
                 paddingHorizontal: 6,
                 paddingVertical: 4,
-                borderRadius: 6,
+                borderRadius: borderRadius.sm,
                 flexShrink: 0,
               }}>
                 <Package size={10} color="#475569" strokeWidth={2} />

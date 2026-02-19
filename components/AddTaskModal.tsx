@@ -1,4 +1,4 @@
-import { colors } from '@/constants/colors';
+import { borderRadius, colors } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
@@ -872,7 +872,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                     style={{
                       width: '100%',
                       padding: 12,
-                      borderRadius: 12,
+                      borderRadius: borderRadius.md,
                       border: '1px solid #d1d5db',
                       fontSize: 16,
                       marginBottom: 12,
@@ -920,7 +920,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                     style={{
                       width: '100%',
                       padding: 12,
-                      borderRadius: 12,
+                      borderRadius: borderRadius.md,
                       border: '1px solid #d1d5db',
                       fontSize: 16,
                       marginBottom: 12,

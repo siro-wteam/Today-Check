@@ -1,4 +1,4 @@
-import { colors } from '@/constants/colors';
+import { borderRadius, colors } from '@/constants/colors';
 import { getTaskById, moveTaskToBacklog, updateTask, updateTaskAssignees } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
@@ -980,7 +980,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                         style={{
                           width: '100%',
                           padding: 12,
-                          borderRadius: 12,
+                          borderRadius: borderRadius.md,
                           border: '1px solid #d1d5db',
                           fontSize: 16,
                           marginBottom: 12,
@@ -1026,7 +1026,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                         style={{
                           width: '100%',
                           padding: 12,
-                          borderRadius: 12,
+                          borderRadius: borderRadius.md,
                           border: '1px solid #d1d5db',
                           fontSize: 16,
                           marginBottom: 12,

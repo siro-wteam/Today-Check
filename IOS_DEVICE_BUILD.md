@@ -22,3 +22,11 @@
 # 또는
 npm run ios:device
 ```
+
+## 4. 무료(개인) 팀 사용 시 Push Notifications 오류
+
+"Personal development teams do not support the Push Notifications capability" / "Provisioning profile doesn't include the aps-environment entitlement" 가 나오면:
+
+- **원인**: 무료 Apple 개발자 팀은 Push Notifications capability를 지원하지 않음.
+- **조치**: 이 프로젝트는 **plugins/withNoPushEntitlement.js** 로 `aps-environment` entitlement을 제거해 두었으므로, **지금 상태로 다시 빌드**하면 됨. (`ios/TodayCheck/TodayCheck.entitlements` 에서도 해당 키 제거됨.)
+- **참고**: 푸시 알림 기능은 **유료 Apple Developer Program** 가입 후, `app.json` 의 `./plugins/withNoPushEntitlement.js` 플러그인을 제거하고 `npx expo prebuild --clean --platform ios` 실행하면 다시 사용할 수 있음.

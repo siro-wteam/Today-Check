@@ -45,7 +45,7 @@
           "resizeMode": "contain",
           "backgroundColor": "#1E3A8A",
           "dark": {
-            "backgroundColor": "#1E3A8A"
+            "backgroundColor": "#151718"
           }
         }
       ],
@@ -55,7 +55,8 @@
           "photosPermission": "TodayCheck uses your photo library to set group images and profile pictures.",
           "cameraPermission": "TodayCheck uses the camera to take photos for group images and profile pictures."
         }
-      ]
+      ],
+      "./plugins/withNoPushEntitlement.js"
     ],
     "experiments": {
       "typedRoutes": true,

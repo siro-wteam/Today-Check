@@ -69,7 +69,7 @@ export function AppHeader({ onNotificationPress }: AppHeaderProps) {
               style={{
                 width: 36,
                 height: 36,
-                borderRadius: 8,
+                borderRadius: borderRadius.sm,
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
@@ -106,7 +106,7 @@ export function AppHeader({ onNotificationPress }: AppHeaderProps) {
                   top: 6,
                   minWidth: 18,
                   height: 18,
-                  borderRadius: 9,
+                  borderRadius: borderRadius.full,
                   backgroundColor: colors.error,
                   alignItems: 'center',
                   justifyContent: 'center',

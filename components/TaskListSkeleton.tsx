@@ -1,9 +1,11 @@
 /**
  * Task list skeleton UI with blinking animation (Reanimated).
  * Used while tasks are loading instead of a spinner.
+ * Colors follow light/dark mode for visual consistency.
  */
 
 import { borderRadius, colors } from '@/constants/colors';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import React, { useEffect } from 'react';
 import { View } from 'react-native';
 import Animated, {
@@ -13,10 +15,30 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-const SKELETON_BASE = colors.gray200;
 const ROW_COUNT = 5;
 
-function SkeletonRow() {
+const themeColors = {
+  light: {
+    card: colors.card,
+    border: colors.border,
+    skeletonBase: colors.gray200,
+  },
+  dark: {
+    card: colors.gray800,
+    border: colors.gray700,
+    skeletonBase: colors.gray600,
+  },
+} as const;
+
+function SkeletonRow({
+  cardBg,
+  borderColor,
+  skeletonBase,
+}: {
+  cardBg: string;
+  borderColor: string;
+  skeletonBase: string;
+}) {
   const opacity = useSharedValue(0.4);
 
   useEffect(() => {
@@ -42,9 +64,9 @@ function SkeletonRow() {
           paddingVertical: 12,
           borderRadius: borderRadius.lg,
           marginBottom: 8,
-          backgroundColor: colors.card,
+          backgroundColor: cardBg,
           borderWidth: 1,
-          borderColor: colors.border,
+          borderColor,
         },
       ]}
     >
@@ -54,7 +76,7 @@ function SkeletonRow() {
           width: 18,
           height: 18,
           borderRadius: borderRadius.full,
-          backgroundColor: SKELETON_BASE,
+          backgroundColor: skeletonBase,
           marginRight: 12,
           marginTop: 0,
         }}
@@ -64,17 +86,17 @@ function SkeletonRow() {
         <View
           style={{
             height: 14,
-            borderRadius: 4,
-            backgroundColor: SKELETON_BASE,
+            borderRadius: borderRadius.xs,
+            backgroundColor: skeletonBase,
             width: '75%',
             marginBottom: 8,
           }}
         />
         {/* Badges line */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 0 }}>
-          <View style={{ width: 48, height: 10, borderRadius: 6, backgroundColor: SKELETON_BASE }} />
-          <View style={{ width: 56, height: 10, borderRadius: 6, backgroundColor: SKELETON_BASE }} />
-          <View style={{ width: 40, height: 10, borderRadius: 6, backgroundColor: SKELETON_BASE }} />
+          <View style={{ width: 48, height: 10, borderRadius: borderRadius.sm, backgroundColor: skeletonBase }} />
+          <View style={{ width: 56, height: 10, borderRadius: borderRadius.sm, backgroundColor: skeletonBase }} />
+          <View style={{ width: 40, height: 10, borderRadius: borderRadius.sm, backgroundColor: skeletonBase }} />
         </View>
       </View>
     </Animated.View>
@@ -82,10 +104,18 @@ function SkeletonRow() {
 }
 
 export function TaskListSkeleton() {
+  const colorScheme = useColorScheme() ?? 'light';
+  const theme = themeColors[colorScheme === 'dark' ? 'dark' : 'light'];
+
   return (
     <View style={{ paddingHorizontal: 16, paddingVertical: 16 }}>
       {Array.from({ length: ROW_COUNT }).map((_, i) => (
-        <SkeletonRow key={i} />
+        <SkeletonRow
+          key={i}
+          cardBg={theme.card}
+          borderColor={theme.border}
+          skeletonBase={theme.skeletonBase}
+        />
       ))}
     </View>
   );

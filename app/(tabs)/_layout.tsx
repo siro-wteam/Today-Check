@@ -1,5 +1,5 @@
 import { AddTaskModal } from '@/components/AddTaskModal';
-import { colors } from '@/constants/colors';
+import { colors, shadows } from '@/constants/colors';
 import { HapticTab } from '@/components/haptic-tab';
 import { Archive, Home, Plus, User, Users } from 'lucide-react-native';
 import { Tabs } from 'expo-router';
@@ -73,11 +73,9 @@ export default function TabLayout() {
                 style={{
                   marginTop: -16, // -translate-y-4
                   backgroundColor: colors.primary,
+                  ...shadows.lg,
                   shadowColor: colors.primary,
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.3, // shadow-primary/30
-                  shadowRadius: 8,
-                  elevation: 8,
+                  shadowOpacity: 0.3,
                 }}
               >
                 <Plus size={28} color="#FFFFFF" strokeWidth={2.5} />

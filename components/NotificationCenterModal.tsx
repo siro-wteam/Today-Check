@@ -405,7 +405,7 @@ export function NotificationCenterModal({ visible, onClose }: NotificationCenter
                         style={{
                           width: 8,
                           height: 8,
-                          borderRadius: 4,
+                          borderRadius: borderRadius.xs,
                           backgroundColor: colors.primary,
                           marginRight: spacing.sm,
                           marginTop: 28, // Align with body content start (title ~22px + margin ~6px)
