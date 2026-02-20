@@ -244,7 +244,11 @@ function BacklogItem({
 
       if (myRole === 'OWNER' || myRole === 'ADMIN') {
         // Owner and Admin: toggle all assignees (checkbox controls all)
-        const allCompleted = task.assignees.every(a => a.is_completed);
+        // When assignees is empty, [].every() is true (vacuous), which would send isCompleted: false. Use task.status instead.
+        const hasAssignees = task.assignees && task.assignees.length > 0;
+        const allCompleted = hasAssignees
+          ? task.assignees!.every((a: any) => a.is_completed)
+          : task.status === 'DONE';
         const newCompletionStatus = !allCompleted;
 
         // Prepare updates for group task completion
@@ -283,20 +287,32 @@ function BacklogItem({
           optimisticUpdate
         );
 
+        // Optimistic update for weekly view (calendar store)
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const mergedForCalendar = { ...task, ...updates } as Task;
+        if (newCompletionStatus && !task.due_date) mergedForCalendar.due_date = todayStr;
+        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+        useCalendarStore.getState().mergeTasksIntoStore([mergedForCalendar]);
+
         try {
-          const { toggleAllAssigneesCompletion } = await import('@/lib/api/tasks');
+          const { toggleAllAssigneesCompletion, updateTask } = await import('@/lib/api/tasks');
           const { error } = await toggleAllAssigneesCompletion(task.id, newCompletionStatus);
-          
-          // Note: No need to update due_date when completing
-          // getAllTasksInRange uses completed_at to show completed tasks
-          
+
           if (error) {
             console.error('Error toggling all assignees:', error);
-            // Rollback on error
+            // Rollback calendar store and queries
+            const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+            useCalendarStore.getState().mergeTasksIntoStore([task]);
             queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
           } else {
+            // When completing from backlog (no due_date), persist due_date/original_due_date to today
+            // so that uncomplete keeps the task on "today" instead of moving to backlog
+            if (newCompletionStatus && !task.due_date) {
+              await updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr });
+              showToast('success', 'Moved to today', 'Task completed and moved to today.');
+            }
             // Success: Invalidate to sync with server state
             queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
@@ -304,7 +320,9 @@ function BacklogItem({
           }
         } catch (error) {
           console.error('Exception toggling all assignees:', error);
-          // Rollback on error
+          // Rollback calendar store and queries
+          const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+          useCalendarStore.getState().mergeTasksIntoStore([task]);
           queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
@@ -355,32 +373,49 @@ function BacklogItem({
           optimisticUpdate
         );
 
+        // Optimistic update for weekly view (calendar store)
+        const memberUpdatedAssignees = task.assignees?.map((a: any) =>
+          a.user_id === user.id
+            ? { ...a, is_completed: newCompletionStatus, completed_at: newCompletionStatus ? new Date().toISOString() : null }
+            : a
+        );
+        const memberAllCompleted = memberUpdatedAssignees?.every((a: any) => a.is_completed) ?? false;
+        const mergedForCalendar = { ...task, assignees: memberUpdatedAssignees, status: memberAllCompleted ? 'DONE' : 'TODO', completed_at: memberAllCompleted ? new Date().toISOString() : null } as Task;
+        if (memberAllCompleted && !task.due_date) mergedForCalendar.due_date = format(new Date(), 'yyyy-MM-dd');
+        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+        useCalendarStore.getState().mergeTasksIntoStore([mergedForCalendar]);
+
         try {
-          const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
+          const { toggleAssigneeCompletion, updateTask } = await import('@/lib/api/tasks');
           const { error } = await toggleAssigneeCompletion(
             task.id,
             user.id,
             myAssignee.is_completed
           );
-          
-          // Note: No need to update due_date when completing
-          // getAllTasksInRange uses completed_at to show completed tasks
-          
+
           if (error) {
             console.error('Error toggling assignee:', error);
-            // Rollback on error
+            // Rollback calendar store and queries
+            const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+            useCalendarStore.getState().mergeTasksIntoStore([task]);
             queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
           } else {
-            const assigneesAfterToggle = task.assignees?.map((a: any) =>
-              a.user_id === user.id ? { ...a, is_completed: newCompletionStatus } : a
-            ) ?? [];
+            // When completing from backlog (no due_date), persist due_date/original_due_date to today
+            // so that uncomplete keeps the task on "today" instead of moving to backlog
+            if (memberAllCompleted && !task.due_date) {
+              const todayStr = format(new Date(), 'yyyy-MM-dd');
+              await updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr });
+              showToast('success', 'Moved to today', 'Task completed and moved to today.');
+            }
+            // Success: keep optimistic update, no invalidation needed
           }
-          // Success: keep optimistic update, no invalidation needed
         } catch (error) {
           console.error('Exception toggling assignee:', error);
-          // Rollback on error
+          // Rollback calendar store and queries
+          const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+          useCalendarStore.getState().mergeTasksIntoStore([task]);
           queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
@@ -392,17 +427,19 @@ function BacklogItem({
     // Personal task: original logic with optimistic update
     const newStatus = task.status === 'DONE' ? 'TODO' : 'DONE';
     const updates: any = { status: newStatus };
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
 
     // If unchecking (DONE -> TODO) and task has no due_date, assign today's date
     if (newStatus === 'TODO' && !task.due_date) {
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
       updates.due_date = todayStr;
       updates.original_due_date = todayStr;
     }
-    
-    // Note: When completing (TODO -> DONE), we don't set due_date
-    // getAllTasksInRange uses completed_at to show completed tasks in today's view
-    // So completed_at is sufficient, no need to update due_date
+
+    // Backlog complete (TODO -> DONE, due_date was null): set due_date/original_due_date to today so task appears in today's list
+    if (newStatus === 'DONE' && !task.due_date) {
+      updates.due_date = todayStr;
+      updates.original_due_date = todayStr;
+    }
 
     // Optimistically update UI immediately - update ALL matching queries
     const optimisticUpdate = (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
@@ -427,13 +464,23 @@ function BacklogItem({
       optimisticUpdate
     );
 
+    // Optimistic update for weekly view (calendar store)
+    const mergedForCalendar = { ...task, ...updates, completed_at: newStatus === 'DONE' ? new Date().toISOString() : null } as Task;
+    const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+    useCalendarStore.getState().mergeTasksIntoStore([mergedForCalendar]);
+
     try {
       await updateTask({ id: task.id, ...updates });
       if (newStatus === 'TODO' && !task.due_date) {
         showToast('success', 'Scheduled', 'Scheduled for today');
+      } else if (newStatus === 'DONE' && !task.due_date) {
+        showToast('success', 'Moved to today', 'Task completed and moved to today.');
       }
     } catch (error) {
       console.error('Error updating task:', error);
+      // Rollback calendar store to original task
+      const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+      useCalendarStore.getState().mergeTasksIntoStore([task]);
       queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
       queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
       queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
@@ -503,15 +550,16 @@ function BacklogItem({
       optimisticUpdate
     );
 
-    // Optimistically add to calendar store
+    // Optimistically add to calendar store (backlog → date: set both due_date and original_due_date)
     const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
-    const updatedTask = { ...task, due_date: today };
+    const updatedTask = { ...task, due_date: today, original_due_date: today };
     useCalendarStore.getState().mergeTasksIntoStore([updatedTask]);
 
     try {
-      const { error } = await updateTask({ 
-        id: task.id, 
-        due_date: today 
+      const { error } = await updateTask({
+        id: task.id,
+        due_date: today,
+        original_due_date: today,
       });
       if (error) {
         const errorMsg = error.message?.includes('permission') || error.code === '42501'
@@ -522,7 +570,7 @@ function BacklogItem({
         queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
         showToast('error', 'Failed', errorMsg);
       } else {
-        showToast('success', 'Scheduled', 'Task scheduled for today');
+        showToast('success', 'Scheduled for today', 'Task scheduled for today.');
         queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
       }
     } catch (error) {

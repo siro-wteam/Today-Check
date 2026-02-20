@@ -1154,7 +1154,7 @@ function TaskItem({
     });
     
     if (result.success) {
-      showToast('success', 'Moved', 'Task moved to Backlog');
+      showToast('success', 'Moved to backlog', 'Task moved to backlog.');
     } else if (result.error) {
       const errorMsg = result.error.message?.includes('permission') || result.error.code === '42501'
         ? 'Permission denied. Only OWNER/ADMIN can modify this task.'

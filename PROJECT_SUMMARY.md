@@ -173,7 +173,7 @@ TodayCheck/
 ### 4. **Smart Task Management**
 - **Short Tap**: 상태 토글 (TODO ↔ DONE)
 - **Long Press**: Action Sheet (Complete/Postpone/Cancel/Delete)
-- **Postpone to Tomorrow**: 내일로 연기 (original_due_date 유지)
+- **Postpone to Tomorrow**: 내일로 연기 (due_date만 변경, original_due_date 유지)
 - **Haptic Feedback**: Light for tap, Heavy for long press
 
 ---
@@ -190,7 +190,7 @@ TodayCheck/
 | status | enum | TODO, DONE, CANCELLED |
 | due_date | date | NULL = Backlog, NOT NULL = 스케줄된 태스크 |
 | due_time | time | 시간 (선택) |
-| original_due_date | date | 생성 시 설정, 지연 계산에 사용 |
+| original_due_date | date | 기준 마감일(롤오버/지연 계산). 백로그↔날짜 전환 시만 갱신, 날짜만 변경 시 유지. 상세: [DUE_DATE_ORIGINAL_DUE_DATE_LOGIC.md](./DUE_DATE_ORIGINAL_DUE_DATE_LOGIC.md) |
 | completed_at | timestamp | 완료 시각 (DONE 시 자동 설정) |
 | deleted_at | timestamp | Soft delete (NULL = 활성) |
 

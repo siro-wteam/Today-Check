@@ -56,8 +56,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
   const { groups, fetchMyGroups } = useGroupStore();
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const [isCreating, setIsCreating] = useState(false);
-  
+
   // Get current group's members
   const currentGroup = groups.find(g => g.id === selectedGroupId);
 
@@ -169,51 +168,33 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
     const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
     const dueTimeEndStr = dueTimeEnd ? format(dueTimeEnd, 'HH:mm:ss') : null;
 
-    setIsCreating(true);
-    
-    try {
-      if (selectedGroupId) {
-        // Group task (with or without assignees)
-        const result = await addTask({
+    // Close immediately so save feels instant; run API in background
+    handleClose();
+
+    const payload = selectedGroupId
+      ? {
           title: cleanedTitle,
           group_id: selectedGroupId,
-          assignee_ids: selectedAssigneeIds, // Can be empty array
+          assignee_ids: selectedAssigneeIds,
           due_date: dueDateStr,
           due_time: dueTimeStr,
           due_time_end: dueTimeEndStr,
-        });
-
-        if (result.success) {
-          // Invalidate queries to refresh React Query cache
-          queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-          queryClient.invalidateQueries({ queryKey: ['tasks'] });
-          handleClose();
-        } else {
-          // Error toast is already shown by addTask
         }
-      } else {
-        // Personal task (single user)
-        const result = await addTask({
+      : {
           title: cleanedTitle,
           due_date: dueDateStr,
           due_time: dueTimeStr,
           due_time_end: dueTimeEndStr,
-        });
+        };
 
-        if (result.success) {
-          // Invalidate queries to refresh React Query cache
-          queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-          queryClient.invalidateQueries({ queryKey: ['tasks'] });
-          handleClose();
-        } else {
-          // Error toast is already shown by addTask
-        }
+    addTask(payload).then((result) => {
+      if (result.success) {
+        queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
       }
-    } catch (error: any) {
-      showToast('error', 'Save Failed', error.message);
-    } finally {
-      setIsCreating(false);
-    }
+    });
   };
 
   // Toggle assignee selection
@@ -383,7 +364,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                 placeholderTextColor="#9ca3af"
                 value={title}
                 onChangeText={setTitle}
-                editable={!isCreating}
+                editable={true}
               />
 
               {/* Assignee Bar (only for group tasks) */}
@@ -960,7 +941,7 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                       handleClose();
                     }}
                     className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl py-4 items-center"
-                    disabled={isCreating}
+                    disabled={false}
                   >
                     <Text className="text-gray-700 dark:text-gray-300 font-semibold">
                       Cancel
@@ -975,12 +956,12 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                       handleSave();
                     }}
                     className={`flex-1 bg-primary rounded-xl py-4 items-center ${
-                      isCreating ? 'opacity-50' : ''
+                      ''
                     }`}
-                    disabled={isCreating}
+                    disabled={false}
                   >
                     <Text className="text-white font-semibold">
-                      {isCreating ? 'Saving...' : 'Save'}
+                      {'Save'}
                     </Text>
                   </Pressable>
                 </View>

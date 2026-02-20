@@ -1273,10 +1273,10 @@ export async function moveTaskToToday(taskId: string) {
 
 /**
  * Move a task to backlog
- * Sets due_date to NULL
+ * Sets both due_date and original_due_date to NULL (no date)
  */
 export async function moveTaskToBacklog(taskId: string) {
-  return updateTask({ id: taskId, due_date: null });
+  return updateTask({ id: taskId, due_date: null, original_due_date: null });
 }
 
 /**

@@ -40,7 +40,7 @@
 
 **모든 날짜 버킷**에 같은 정렬을 적용합니다. 정렬 키에 **status(TODO/DONE)를 넣지 않아**, 완료/미완료 토글 시 노출 순서가 바뀌지 않습니다.
 
-1. **기준일**: `original_due_date` → 없으면 `due_date` → 없으면 `created_at`
+1. **기준일**: `original_due_date` → 없으면 `due_date` → 없으면 `created_at` (갱신 규칙은 [DUE_DATE_ORIGINAL_DUE_DATE_LOGIC.md](./DUE_DATE_ORIGINAL_DUE_DATE_LOGIC.md) 참고)
 2. 위 날짜 기준 **오름차순**
 3. 같은 경우 `due_time` 문자열 비교
 4. 그다음 `created_at` 문자열 비교

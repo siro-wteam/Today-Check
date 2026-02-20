@@ -1212,7 +1212,7 @@ const DailyCard = React.memo(function DailyCard({
                     <Pressable
                       onPress={async () => {
                         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        await updateTaskInStore(task.id, { due_date: null });
+                        await updateTaskInStore(task.id, { due_date: null, original_due_date: null });
                         const { error } = await moveTaskToBacklog(task.id);
                         if (error) {
                           const errorMsg = error.message?.includes('permission') || error.code === '42501'
@@ -1221,7 +1221,7 @@ const DailyCard = React.memo(function DailyCard({
                           showToast('error', 'Failed', errorMsg);
                           queryClient.invalidateQueries({ queryKey: ['tasks'] });
                         } else {
-                          showToast('success', 'Moved', 'Task moved to backlog');
+                          showToast('success', 'Moved to backlog', 'Task moved to backlog.');
                           queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
                         }
                       }}

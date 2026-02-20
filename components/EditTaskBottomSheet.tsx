@@ -142,6 +142,10 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   // Check if task can be moved to backlog (must have due_date and be TODO status)
   const canMoveToBacklog = task.due_date !== null && task.due_date !== undefined && task.status === 'TODO';
 
+  // Completed tasks: read-only in edit modal (user must mark incomplete to edit)
+  const isCompleted = task.status === 'DONE';
+  const effectiveCanEdit = canEdit && !isCompleted;
+
   // Check if selected group allows editing (for group switching)
   const canEditSelectedGroup = selectedGroupId
     ? (groups.find(g => g.id === selectedGroupId)?.myRole === 'OWNER' || groups.find(g => g.id === selectedGroupId)?.myRole === 'ADMIN')
@@ -234,10 +238,11 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
     if (!confirmed) return;
 
     try {
-      // Create optimistic task with due_date cleared
+      // Create optimistic task with due_date and original_due_date cleared
       const optimisticTask: Task = {
         ...task,
         due_date: null,
+        original_due_date: null,
         updated_at: new Date().toISOString(),
       };
 
@@ -280,6 +285,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
         throw error;
       }
 
+      showToast('success', 'Moved to backlog', 'Task moved to backlog.');
       // Success - close modal and trigger update
       handleClose();
       
@@ -302,136 +308,129 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       showToast('error', 'Permission Denied', 'Only group owners can edit group tasks');
       return;
     }
+    if (isCompleted) {
+      return; // Read-only when completed
+    }
 
-    setIsSaving(true);
+    // Format dates and build payload
+    const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
+    const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
+    const dueTimeEndStr = dueTimeEnd ? format(dueTimeEnd, 'HH:mm:ss') : null;
+    const wasBacklog = !task.due_date;
+    const dateChanged = !!task.due_date && !!dueDateStr && task.due_date !== dueDateStr;
 
-    try {
-      // Format dates
-      const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
-      const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
-      const dueTimeEndStr = dueTimeEnd ? format(dueTimeEnd, 'HH:mm:ss') : null;
+    const optimisticTask: Task = {
+      ...task,
+      title: title.trim(),
+      due_date: dueDateStr,
+      original_due_date: wasBacklog && dueDateStr ? dueDateStr : task.original_due_date,
+      due_time: dueTimeStr,
+      due_time_end: dueTimeEndStr,
+      group_id: selectedGroupId,
+      updated_at: new Date().toISOString(),
+    };
 
-      // Create optimistic task for immediate UI update
-      const optimisticTask: Task = {
-        ...task,
-        title: title.trim(),
-        due_date: dueDateStr,
-        due_time: dueTimeStr,
-        due_time_end: dueTimeEndStr,
-        group_id: selectedGroupId,
-        updated_at: new Date().toISOString(),
-      };
+    const updatePayload: Parameters<typeof updateTask>[0] = {
+      id: task.id,
+      title: title.trim(),
+      due_date: dueDateStr,
+      due_time: dueTimeStr,
+      due_time_end: dueTimeEndStr,
+      group_id: selectedGroupId,
+    };
+    if (wasBacklog && dueDateStr) {
+      updatePayload.original_due_date = dueDateStr;
+    }
 
-      // Apply optimistic update to CalendarStore
-      const { calculateRolloverInfo } = await import('@/lib/api/tasks');
-      const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
-      mergeTasksIntoStore(tasksWithRollover);
+    // Apply optimistic update so UI updates immediately
+    const { calculateRolloverInfo } = await import('@/lib/api/tasks');
+    const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
+    mergeTasksIntoStore(tasksWithRollover);
+    queryClient.setQueriesData(
+      { queryKey: ['tasks', 'unified'], exact: false },
+      (oldData: any) => {
+        if (!oldData) return oldData;
+        if (Array.isArray(oldData)) {
+          return oldData.map((t: any) => (t.id === task.id ? optimisticTask : t));
+        }
+        return oldData;
+      }
+    );
 
-      // Apply optimistic update to React Query cache
+    // Close immediately and show success so save feels instant
+    const dateLabel = dueDate ? format(dueDate, 'MMM d, yyyy') : '';
+    if (wasBacklog && dueDateStr) {
+      showToast('success', 'Scheduled', `Task scheduled for ${dateLabel}.`);
+    } else if (dateChanged) {
+      showToast('success', 'Rescheduled', `Task rescheduled to ${dateLabel}.`);
+    } else {
+      showToast('success', 'Updated', 'Task updated.');
+    }
+    handleClose();
+    if (onUpdate) setTimeout(() => onUpdate(), 200);
+
+    const revert = async () => {
+      const { calculateRolloverInfo: revertCalc } = await import('@/lib/api/tasks');
+      mergeTasksIntoStore(revertCalc([task as Task]));
       queryClient.setQueriesData(
         { queryKey: ['tasks', 'unified'], exact: false },
         (oldData: any) => {
           if (!oldData) return oldData;
           if (Array.isArray(oldData)) {
-            return oldData.map((t: any) => t.id === task.id ? optimisticTask : t);
+            return oldData.map((t: any) => (t.id === task.id ? task : t));
           }
           return oldData;
         }
       );
+    };
 
-      // Update task basic info - use API directly for backlog tasks
-      const updateResult = await updateTask({
-        id: task.id,
-        title: title.trim(),
-        due_date: dueDateStr,
-        due_time: dueTimeStr,
-        due_time_end: dueTimeEndStr,
-        group_id: selectedGroupId,
-      });
-
-      if (updateResult.error) {
-        // Revert optimistic update on error
-        const { calculateRolloverInfo: revertCalc } = await import('@/lib/api/tasks');
-        const revertTasks = revertCalc([task as Task]);
-        mergeTasksIntoStore(revertTasks);
-        
-        queryClient.setQueriesData(
-          { queryKey: ['tasks', 'unified'], exact: false },
-          (oldData: any) => {
-            if (!oldData) return oldData;
-            if (Array.isArray(oldData)) {
-              return oldData.map((t: any) => t.id === task.id ? task : t);
-            }
-            return oldData;
-          }
-        );
-        
-        throw new Error(updateResult.error.message || 'Failed to update task');
-      }
-
-      // Update assignees if group task
-      if (selectedGroupId) {
-        const { error: assigneeError } = await updateTaskAssignees(
-          task.id,
-          selectedAssigneeIds
-        );
-
-        if (assigneeError) {
-          throw assigneeError;
+    // Persist in background; revert and show error on failure
+    (async () => {
+      try {
+        const updateResult = await updateTask(updatePayload);
+        if (updateResult.error) {
+          await revert();
+          showToast('error', 'Save Failed', updateResult.error.message || 'Failed to update task');
+          return;
         }
-      } else {
-        // Personal task - remove all assignees if switching from group to personal
-        if (task.group_id) {
+        if (selectedGroupId) {
+          const { error: assigneeError } = await updateTaskAssignees(task.id, selectedAssigneeIds);
+          if (assigneeError) {
+            await revert();
+            showToast('error', 'Save Failed', assigneeError.message);
+            return;
+          }
+        } else if (task.group_id) {
           const { error: assigneeError } = await updateTaskAssignees(task.id, []);
           if (assigneeError) {
-            throw assigneeError;
+            await revert();
+            showToast('error', 'Save Failed', assigneeError.message);
+            return;
           }
         }
+        const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
+        if (!fetchError && updatedTask) {
+          const { calculateRolloverInfo: calc } = await import('@/lib/api/tasks');
+          mergeTasksIntoStore(calc([updatedTask]));
+          queryClient.setQueriesData(
+            { queryKey: ['tasks', 'unified'], exact: false },
+            (oldData: any) => {
+              if (!oldData) return oldData;
+              return Array.isArray(oldData)
+                ? oldData.map((t: any) => (t.id === task.id ? updatedTask : t))
+                : oldData;
+            }
+          );
+        }
+      } catch (error: any) {
+        await revert();
+        showToast('error', 'Save Failed', error.message);
       }
-
-      // After assignees update, fetch the complete updated task and merge into store
-      const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
-      if (!fetchError && updatedTask) {
-        const { calculateRolloverInfo } = await import('@/lib/api/tasks');
-        const tasksWithRollover = calculateRolloverInfo([updatedTask]);
-        mergeTasksIntoStore(tasksWithRollover);
-        
-        // Also update React Query cache
-        queryClient.setQueriesData(
-          { queryKey: ['tasks', 'unified'], exact: false },
-          (oldData: any) => {
-            if (!oldData) return oldData;
-            return oldData.map((t: any) => t.id === task.id ? updatedTask : t);
-          }
-        );
-      }
-
-      // Success - show toast and close modal
-      const wasBacklog = !task.due_date;
-      const nowScheduled = !!dueDateStr;
-      
-      if (wasBacklog && nowScheduled) {
-        showToast('success', 'Task Scheduled');
-      } else {
-        showToast('success', 'Task Updated');
-      }
-      
-      handleClose();
-      
-      // onUpdate callback is optional (for backward compatibility)
-      if (onUpdate) {
-        setTimeout(() => {
-          onUpdate();
-        }, 200);
-      }
-    } catch (error: any) {
-      setIsSaving(false);
-      showToast('error', 'Save Failed', error.message);
-    }
+    })();
   };
 
   const handleGroupSelect = (groupId: string | null) => {
-    if (!canEdit) return;
+    if (!effectiveCanEdit) return;
     
     // Toggle: if already selected, deselect it
     if (selectedGroupId === groupId) {
@@ -453,7 +452,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
 
   // Toggle assignee selection
   const toggleAssignee = (userId: string) => {
-    if (!canEdit) return;
+    if (!effectiveCanEdit) return;
     
     const isCurrentlySelected = selectedAssigneeIds.includes(userId);
     
@@ -601,6 +600,15 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 </View>
               )}
 
+              {/* Completed task: read-only notice */}
+              {isCompleted && (
+                <View className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 mb-4">
+                  <Text className="text-gray-700 dark:text-gray-300 text-sm">
+                    This task is completed. Mark it incomplete to edit.
+                  </Text>
+                </View>
+              )}
+
               {/* Group Selector */}
               <ScrollView
                 horizontal
@@ -620,12 +628,12 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                           }
                           handleGroupSelect(group.id);
                         }}
-                        disabled={!canEdit}
+                        disabled={!effectiveCanEdit}
                         className={`px-4 py-2 rounded-full flex-row items-center gap-2 ${
                           selectedGroupId === group.id
                             ? 'bg-primary'
                             : 'bg-gray-100 dark:bg-gray-800'
-                        } ${!canEdit ? 'opacity-50' : ''}`}
+                        } ${!effectiveCanEdit ? 'opacity-50' : ''}`}
                       >
                         <Users 
                           size={14} 
@@ -652,7 +660,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 placeholderTextColor="#9ca3af"
                 value={title}
                 onChangeText={setTitle}
-                editable={canEdit}
+                editable={effectiveCanEdit}
               />
 
               {/* Assignee Bar (only for group tasks) */}
@@ -679,12 +687,12 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                               }
                               toggleAssignee(member.id);
                             }}
-                            disabled={!canEdit}
+                            disabled={!effectiveCanEdit}
                             className={`px-4 py-2 rounded-full flex-row items-center gap-2 border-2 ${
                               isSelected
                                 ? 'bg-blue-50 dark:bg-blue-900/30 border-primary'
                                 : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-                            } ${!canEdit ? 'opacity-50' : ''}`}
+                            } ${!effectiveCanEdit ? 'opacity-50' : ''}`}
                           >
                             <View 
                               className="w-6 h-6 rounded-full items-center justify-center"
@@ -727,12 +735,12 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                     }
                     handleQuickDate(new Date());
                   }}
-                  disabled={!canEdit}
+                  disabled={!effectiveCanEdit}
                   className={`px-4 py-2 rounded-full ${
                     isDateSelected(new Date())
                       ? 'bg-primary'
                       : 'bg-gray-100 dark:bg-gray-800'
-                  } ${!canEdit ? 'opacity-50' : ''}`}
+                  } ${!effectiveCanEdit ? 'opacity-50' : ''}`}
                 >
                   <Text
                     className={`font-semibold ${
@@ -752,12 +760,12 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                     }
                     handleQuickDate(addDays(new Date(), 1));
                   }}
-                  disabled={!canEdit}
+                  disabled={!effectiveCanEdit}
                   className={`px-4 py-2 rounded-full ${
                     isDateSelected(addDays(new Date(), 1))
                       ? 'bg-primary'
                       : 'bg-gray-100 dark:bg-gray-800'
-                  } ${!canEdit ? 'opacity-50' : ''}`}
+                  } ${!effectiveCanEdit ? 'opacity-50' : ''}`}
                 >
                   <Text
                     className={`font-semibold ${
@@ -777,12 +785,12 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                     }
                     setShowDatePicker(true);
                   }}
-                  disabled={!canEdit}
+                  disabled={!effectiveCanEdit}
                   className={`px-4 py-2 rounded-full ${
                     dueDate && !isToday(dueDate) && !isTomorrow(dueDate)
                       ? 'bg-primary'
                       : 'bg-gray-100 dark:bg-gray-800'
-                  } ${!canEdit ? 'opacity-50' : ''}`}
+                  } ${!effectiveCanEdit ? 'opacity-50' : ''}`}
                 >
                   <Text
                     className={`font-semibold ${
@@ -800,13 +808,13 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
 
               {/* Time Selection: [아이콘+시작시간+제거] ~ [아이콘+종료시간+제거] */}
               {dueDate && (
-                <View className={`flex-row items-center flex-wrap gap-2 mb-4 ${!canEdit ? 'opacity-50' : ''}`} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View className={`flex-row items-center flex-wrap gap-2 mb-4 ${!effectiveCanEdit ? 'opacity-50' : ''}`} style={{ flexDirection: 'row', alignItems: 'center' }}>
                   {/* 그룹: 시작시간 */}
                   <View className="flex-row items-center rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 pl-2 pr-1 py-2" style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <Text className="text-gray-700 dark:text-gray-300 mr-1.5">🕐</Text>
                     <Pressable
                       onPress={() => {
-                        if (!canEdit) return;
+                        if (!effectiveCanEdit) return;
                         if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                       timeBeforeOpenRef.current = dueTime ? new Date(dueTime.getTime()) : null;
                         setTimePickerValue(dueTime ?? getDefaultTime());
@@ -819,7 +827,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                         {dueTime ? format(dueTime, 'HH:mm') : 'Start (Optional)'}
                       </Text>
                     </Pressable>
-                    {canEdit && dueTime != null && (
+                    {effectiveCanEdit && dueTime != null && (
                       <Pressable
                         onPress={() => {
                           if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -838,7 +846,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                     <Text className="text-gray-700 dark:text-gray-300 mr-1.5">🕐</Text>
                     <Pressable
                       onPress={() => {
-                        if (!canEdit) return;
+                        if (!effectiveCanEdit) return;
                         if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                       endTimeBeforeOpenRef.current = dueTimeEnd ? new Date(dueTimeEnd.getTime()) : null;
                         setEndTimePickerValue(dueTimeEnd ?? dueTime ?? getDefaultTime());
@@ -851,7 +859,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                         {dueTimeEnd ? format(dueTimeEnd, 'HH:mm') : 'End (Optional)'}
                       </Text>
                     </Pressable>
-                    {canEdit && dueTimeEnd != null && (
+                    {effectiveCanEdit && dueTimeEnd != null && (
                       <Pressable
                         onPress={() => {
                           if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -1301,7 +1309,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                     className={`flex-1 bg-primary rounded-xl py-4 items-center ${
                       isSaving ? 'opacity-50' : ''
                     }`}
-                    disabled={isSaving || !canEdit}
+                    disabled={isSaving || !effectiveCanEdit}
                   >
                     <Text className="text-white font-semibold">
                       {isSaving ? 'Saving...' : 'Save'}

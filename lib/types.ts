@@ -72,7 +72,8 @@ export interface UpdateTaskInput {
   due_time_end?: string | null;
   completed_at?: string | null;
   group_id?: string | null; // Allow changing group (null = personal task)
-  // Note: original_due_date should NOT be updated after creation
+  // Set when scheduling from backlog; clear (null) when moving to backlog; omit when only rescheduling date
+  original_due_date?: string | null;
 }
 
 // Helper type for task with calculated rollover info

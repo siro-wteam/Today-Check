@@ -1,78 +1,120 @@
-# due_date / original_due_date 수정 로직 정리
+# due_date / original_due_date 로직 (참고용)
+
+이 문서는 **due_date**와 **original_due_date**의 갱신 규칙과, 롤오버/지연 계산·UI 안내를 수정할 때 참고하기 위한 자료입니다.
+
+---
 
 ## 1. 필드 의미
 
-| 필드 | 의미 | 갱신 시점 |
-|------|------|-----------|
-| **due_date** | 현재 예정일. NULL = 백로그 | 생성·수정·백로그 이동·오늘로 이동 시 변경 |
-| **original_due_date** | “원래 예정일”(롤오버/지연 계산용). 생성 시 한 번 설정 | **일반적으로 수정하지 않음** (주석: set once on creation) |
+| 필드 | 의미 | 갱신 규칙 |
+|------|------|------------|
+| **due_date** | 현재 예정일. `NULL` = 백로그(날짜 없음) | 백로그 이동·날짜 설정·날짜 변경 시 갱신 |
+| **original_due_date** | “기준 마감일”(롤오버/지연/늦게 완료 계산용) | **백로그 ↔ 날짜 전환 시에만** 갱신. **날짜만 변경할 때는 유지** |
 
-- **롤오버**: `due_date < 오늘` && `status === 'TODO'` 인 태스크를 “오늘”에만 표시.
-- **지연일(+Nd)**: `calculateRolloverInfo()`에서 `original_due_date`와 오늘의 차이로 계산.
-
----
-
-## 2. 시나리오: 2.1 예정 → 백로그 → 2.10에 “오늘로 세팅”
-
-가정: 최초 due_date = 2.1, 백로그로 이동 후, 오늘 2.10에 백로그에서 “오늘로 할당” 실행.
-
-### 2.1 백로그로 이동 시 (홈/일간 스와이프 “Backlog”)
-
-- **호출**: `moveTaskToBacklog(taskId)` → `updateTask({ id, due_date: null })`
-- **전달 필드**: `due_date` 만.
-- **결과**:
-  - `due_date` = **null**
-  - `original_due_date` = **그대로 2.1** (업데이트 인자에 없으므로 DB 값 유지)
-
-### 2.2 백로그에서 “오늘로 할당” 시 (백로그 스와이프 “오늘로”)
-
-- **호출**: `updateTask({ id, due_date: today })` (today = '2025-02-10')
-- **전달 필드**: `due_date` 만.
-- **결과**:
-  - `due_date` = **2.10** (오늘)
-  - `original_due_date` = **그대로 2.1** (업데이트 인자에 없음)
-
-### 2.3 화면에 어떻게 나오는지
-
-- **노출 날짜(버킷)**  
-  `lib/utils/task-filtering.ts`의 `groupTasksByDate()`는 **due_date**만 사용합니다.
-  - `due_date = 2.10` → **2.10(오늘) 버킷**에 표시됨. ✅
-
-- **지연일 배지 (+Nd)**  
-  `lib/api/tasks.ts`의 `calculateRolloverInfo()`는 **original_due_date**로 계산합니다.
-  - `original_due_date = 2.1`, 오늘 = 2.10 → `daysOverdue = 9`, `isOverdue = true`
-  - 따라서 **“+9”** 배지가 그대로 노출됩니다.
-
-정리하면:
-
-- **due_date는 2.10으로 바뀌고**, 오늘(2.10) 리스트에 들어갑니다.
-- **original_due_date는 2.1로 남아 있어서**, “이미 9일 지난 일정”처럼 **+9일**로 표시됩니다.
+- **롤오버 (+Nd)**: `calculateRolloverInfo()`에서 `original_due_date`와 오늘의 차이로 `daysOverdue` 계산.
+- **지연 통계**: `getUserStats()` 등에서 `original_due_date || due_date`를 기준일로 사용.
+- **늦게 완료**: 완료일 − 기준일 계산 시 `original_due_date || due_date` 사용.
 
 ---
 
-## 3. 관련 코드 위치
+## 2. 갱신 규칙 (반드시 준수)
 
-| 처리 | 파일 | 내용 |
-|------|------|------|
-| 백로그 이동 | `lib/api/tasks.ts` | `moveTaskToBacklog()` → `updateTask({ id, due_date: null })` |
-| 오늘로 할당 | `app/(tabs)/backlog.tsx` | `updateTask({ id, due_date: today })` |
-| 수정 시 original 유지 | `lib/api/tasks.ts` | `updateTask()` 주석: original_due_date is NOT updated |
-| 롤오버/지연 계산 | `lib/api/tasks.ts` | `calculateRolloverInfo()` → `original_due_date` 기준 daysOverdue |
-| 날짜 버킷/정렬 | `lib/utils/task-filtering.ts` | `groupTasksByDate()` → 버킷은 due_date, 정렬에 original_due_date \|\| due_date 사용 |
+| 상황 | due_date | original_due_date |
+|------|----------|--------------------|
+| **일정 → 백로그** | `null` | `null` |
+| **백로그 → 특정일** | 그날 | 그날 |
+| **이미 날짜 있는 일정의 날짜만 변경** | 변경 | **유지** (변경하지 않음) |
+
+- **백로그로 이동**: “날짜 없음” 상태로 리셋 → 둘 다 `null`.
+- **백로그에서 날짜 부여**: “그날이 처음 마감일” → 둘 다 그날.
+- **날짜만 수정**: “원래 마감일”은 그대로 두고 현재 예정일만 변경 → `due_date`만 전달, `original_due_date`는 API/클라이언트 모두에서 건드리지 않음.
 
 ---
 
-## 4. “오늘로 세팅 = 깨끗한 오늘 일정”으로 바꾸고 싶을 때
+## 3. 사용자 안내 (토스트, 영어)
 
-백로그에서 “오늘로 할당”했을 때 **+Nd 없이** “오늘 일정”으로만 보이게 하려면:
+모든 이동/일정 변경 시 사용자에게 영어로 안내합니다.
 
-- **오늘로 할당 시 `original_due_date`도 오늘로 맞춰 주면 됩니다.**
-  - 예: `updateTask({ id, due_date: today, original_due_date: today })`
-  - 이때 `UpdateTaskInput`에 `original_due_date`를 추가하고, 백로그의 “오늘로 할당” 호출부에서만 이렇게 넘기면 됩니다.
+| 상황 | 토스트 (title / message) |
+|------|---------------------------|
+| **백로그로 이동** | `Moved to backlog` / `Task moved to backlog.` |
+| **백로그 → 오늘** | `Scheduled for today` / `Task scheduled for today.` |
+| **백로그 → 특정일 (편집 시트)** | `Scheduled` / `Task scheduled for [MMM d, yyyy].` |
+| **날짜만 변경 (편집 시트)** | `Rescheduled` / `Task rescheduled to [MMM d, yyyy].` |
+| **기타 수정** | `Updated` / `Task updated.` |
 
-이렇게 하면:
+---
 
-- due_date = 2.10, original_due_date = 2.10
-- `calculateRolloverInfo()` 기준 지연일 = 0 → **+N 배지 없음**.
+## 4. 코드 위치 (수정 시 참고)
 
-원하면 이 방식으로 수정하는 패치 포인트(파일/함수명)까지 구체적으로 적어줄 수 있습니다.
+### 4.1 API
+
+| 처리 | 파일 | 함수/내용 |
+|------|------|------------|
+| 백로그로 이동 | `lib/api/tasks.ts` | `moveTaskToBacklog(taskId)` → `updateTask({ id, due_date: null, original_due_date: null })` |
+| 태스크 수정 (공통) | `lib/api/tasks.ts` | `updateTask(input)` — 전달된 필드만 DB 반영. 날짜만 바꿀 때는 `original_due_date` 넘기지 않음 |
+| 롤오버/지연 계산 | `lib/api/tasks.ts` | `calculateRolloverInfo()` — `original_due_date` 기준 `daysOverdue` |
+| 지연 통계 | `lib/api/tasks.ts` | `getUserStats()` — 기준일 = `original_due_date \|\| due_date` |
+
+### 4.2 백로그로 이동 (둘 다 null)
+
+| 위치 | 내용 |
+|------|------|
+| `lib/api/tasks.ts` | `moveTaskToBacklog()` 에서 `original_due_date: null` 포함 |
+| `app/(tabs)/index.tsx` | 스와이프 백로그: `updateTaskInStore(..., { due_date: null, original_due_date: null })` 후 `moveTaskToBacklog()` |
+| `app/day.tsx` | 스와이프 백로그: `updateTaskInStore(..., { due_date: null, original_due_date: null })` |
+| `components/EditTaskBottomSheet.tsx` | Move to Backlog: 낙관 업데이트에 `original_due_date: null` 포함, API는 `moveTaskToBacklog()` |
+
+### 4.3 백로그 → 특정일 (둘 다 그날)
+
+| 위치 | 내용 |
+|------|------|
+| `app/(tabs)/backlog.tsx` | “Schedule for today”: `updateTask({ id, due_date: today, original_due_date: today })`, 낙관 업데이트에도 둘 다 `today` |
+| `components/EditTaskBottomSheet.tsx` | 저장 시 `wasBacklog && dueDateStr` 이면 `updateTask`에 `original_due_date: dueDateStr` 포함, 낙관 업데이트에도 반영 |
+
+### 4.4 날짜만 변경 (due_date만, original_due_date 유지)
+
+| 위치 | 내용 |
+|------|------|
+| `components/EditTaskBottomSheet.tsx` | 저장 시 이미 날짜 있는 태스크(`!wasBacklog`)는 `due_date`만 전달, `original_due_date` 미포함 |
+| `lib/api/tasks.ts` | `postponeTask` / `postponeTaskToDate` — `due_date`만 업데이트 (동일 규칙) |
+| `lib/api/tasks.ts` | `moveTaskToToday()` — `due_date`만 전달 (이미 날짜 있는 일정 “오늘로” 이동 시) |
+
+### 4.5 타입
+
+| 파일 | 내용 |
+|------|------|
+| `lib/types.ts` | `UpdateTaskInput` 에 `original_due_date?: string \| null` (백로그↔날짜 전환 시에만 전달) |
+
+### 4.6 표시/정렬
+
+| 파일 | 내용 |
+|------|------|
+| `lib/utils/task-filtering.ts` | `groupTasksByDate()` — 정렬 키 `original_due_date \|\| due_date \|\| created_at` |
+| `app/day.tsx` / `app/(tabs)/index.tsx` | 늦게 완료 일수: 기준일 = `original_due_date \|\| due_date` |
+
+---
+
+## 5. 시나리오 요약
+
+- **2/10 일정 생성**  
+  → `due_date = 2/10`, `original_due_date = 2/10` (생성 시 둘 다 설정)
+
+- **2/10 → 2/12 로 날짜만 수정**  
+  → `due_date = 2/12`, `original_due_date = 2/10` 유지 → 롤오버/지연은 2/10 기준
+
+- **2/10 일정을 백로그로 이동**  
+  → `due_date = null`, `original_due_date = null`
+
+- **백로그에서 2/15 로 스케줄**  
+  → `due_date = 2/15`, `original_due_date = 2/15`  
+  → 이후 2/20 으로 수정하면 `due_date = 2/20`, `original_due_date = 2/15` 유지
+
+---
+
+## 6. 수정 시 체크리스트
+
+- [ ] 백로그로 보낼 때 `due_date`와 `original_due_date` 둘 다 `null`로 보내는가?
+- [ ] 백로그에서 날짜를 넣을 때 둘 다 그날로 설정하는가? (백로그 화면 “오늘로” + 편집 시트에서 날짜 선택)
+- [ ] 이미 날짜 있는 일정의 날짜만 바꿀 때 `original_due_date`를 넘기지 않는가?
+- [ ] 이동/일정 변경 시 토스트가 영어로 위 표와 맞게 나오는가?
