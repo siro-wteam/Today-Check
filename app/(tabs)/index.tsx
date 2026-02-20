@@ -10,6 +10,8 @@ import { borderRadius, colors, shadows } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
+import { getMineLabelStyle, getGroupLabelStyle } from '@/lib/utils/task-label-colors';
 import type { TaskStatus } from '@/lib/types';
 import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
@@ -65,6 +67,7 @@ export default function WeekScreen() {
     mergeTasksIntoStore,
     rollbackCopyWeek,
   } = useCalendarStore();
+  const { filter: taskFilter, toggleFilter } = useTaskFilterStore();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   
@@ -99,13 +102,19 @@ export default function WeekScreen() {
   const [currentWeekStartStr, setCurrentWeekStartStr] = useState<string>(THIS_WEEK_START_STR);
   const currentWeekStartStrRef = useRef<string>(THIS_WEEK_START_STR);
   
+  // Filter by Mine or group (toggle labels)
+  const filteredTasks = useMemo(() => {
+    if (!taskFilter) return tasks;
+    if (taskFilter === 'mine') return tasks.filter((t) => !t.group_id);
+    return tasks.filter((t) => t.group_id === taskFilter);
+  }, [tasks, taskFilter]);
+
   // Group tasks by date (O(1) lookup)
-  // Use tasks.length and a hash of task IDs to detect changes
   const tasksHash = useMemo(() => {
-    return tasks.map(t => `${t.id}:${t.status}`).join(',');
-  }, [tasks]);
+    return filteredTasks.map(t => `${t.id}:${t.status}`).join(',');
+  }, [filteredTasks]);
   
-  const tasksByDate = useMemo(() => groupTasksByDate(tasks), [tasks, tasksHash]);
+  const tasksByDate = useMemo(() => groupTasksByDate(filteredTasks), [filteredTasks, tasksHash]);
   
   // Generate ALL week pages upfront (fixed structure, -3 months ~ +3 months)
   // This array structure NEVER changes - only data gets updated
@@ -900,7 +909,8 @@ const DailyCard = React.memo(function DailyCard({
   const queryClient = useQueryClient();
   const { groups } = useGroupStore();
   const { user } = useAuth();
-  
+  const { filter: taskFilter, toggleFilter } = useTaskFilterStore();
+
   // Create groups map for O(1) lookup
   const groupsMap = useMemo(() => {
     const map = new Map<string, typeof groups[0]>();
@@ -1375,16 +1385,34 @@ const DailyCard = React.memo(function DailyCard({
                         />
                       )}
                       
-                      {task.group_id && (() => {
-                        const groupName = groupsMap.get(task.group_id)?.name;
-                        return groupName ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.gray100, paddingHorizontal: 6, paddingVertical: 2, borderRadius: borderRadius.sm, flexShrink: 0, maxWidth: 100 }}>
-                            <Users size={10} color={colors.textSub} strokeWidth={2} />
-                            <Text style={{ fontSize: 10, fontWeight: '500', color: colors.textSub, marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
-                              {String(groupName)}
+                      {(() => {
+                        const isMine = !task.group_id;
+                        const groupName = task.group_id ? groupsMap.get(task.group_id)?.name : null;
+                        const label = isMine ? 'Mine' : (groupName || '');
+                        if (!label) return null;
+                        const isToggled = isMine ? taskFilter === 'mine' : taskFilter === task.group_id;
+                        const style = isMine ? getMineLabelStyle(isToggled) : getGroupLabelStyle(task.group_id!, groups, isToggled);
+                        return (
+                          <Pressable
+                            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); toggleFilter(isMine ? 'mine' : task.group_id!); }}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              backgroundColor: style.bg,
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              borderRadius: borderRadius.sm,
+                              flexShrink: 0,
+                              maxWidth: 100,
+                              ...(style.borderWidth !== undefined && { borderWidth: style.borderWidth, borderColor: style.borderColor }),
+                            }}
+                          >
+                            <Users size={10} color={style.text} strokeWidth={2} />
+                            <Text style={{ fontSize: 10, fontWeight: '500', color: style.text, marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
+                              {label}
                             </Text>
-                          </View>
-                        ) : null;
+                          </Pressable>
+                        );
                       })()}
                       
                       {(task.due_time || task.due_time_end) && (

@@ -9,7 +9,9 @@ import { deleteTask, updateTask } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useBacklogTasks } from '@/lib/hooks/use-backlog-tasks';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
 import type { Task } from '@/lib/types';
+import { getMineLabelStyle, getGroupLabelStyle } from '@/lib/utils/task-label-colors';
 import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -29,8 +31,15 @@ const PAGE_WIDTH = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_
 
 export default function BacklogScreen() {
   const { tasks, isLoading, isError, error, refetch } = useBacklogTasks();
+  const { filter: taskFilter } = useTaskFilterStore();
   const [refreshing, setRefreshing] = useState(false);
   const queryClient = useQueryClient();
+
+  const filteredTasks = useMemo(() => {
+    if (!taskFilter) return tasks;
+    if (taskFilter === 'mine') return tasks.filter((t) => !t.group_id);
+    return tasks.filter((t) => t.group_id === taskFilter);
+  }, [tasks, taskFilter]);
 
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   
@@ -107,7 +116,7 @@ export default function BacklogScreen() {
           {tasks.filter(t => t.status === 'TODO').length > 0 && (
             <View style={styles.sectionHeaderBadge}>
               <Text style={styles.sectionHeaderBadgeText}>
-                {tasks.filter(t => t.status === 'TODO').length}
+                {filteredTasks.filter(t => t.status === 'TODO').length}
               </Text>
             </View>
           )}
@@ -127,6 +136,10 @@ export default function BacklogScreen() {
         {tasks.length === 0 ? (
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
             <EmptyState message="No tasks in backlog" />
+          </View>
+        ) : filteredTasks.length === 0 ? (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+            <EmptyState message={taskFilter ? 'No tasks match the current filter' : 'No tasks in backlog'} />
           </View>
         ) : (
           <ScrollView
@@ -152,9 +165,9 @@ export default function BacklogScreen() {
             }
           >
             {/* Incomplete Tasks */}
-            {tasks.filter(t => t.status === 'TODO').length > 0 && (
+            {filteredTasks.filter(t => t.status === 'TODO').length > 0 && (
               <View style={{ marginBottom: 12 }}>
-                {tasks
+                {filteredTasks
                   .filter(t => t.status === 'TODO')
                   .map((item) => (
                     <BacklogItem
@@ -166,7 +179,7 @@ export default function BacklogScreen() {
             )}
 
             {/* Completed Tasks Section */}
-            {tasks.filter(t => t.status === 'DONE').length > 0 && (
+            {filteredTasks.filter(t => t.status === 'DONE').length > 0 && (
               <View style={{ marginTop: 32 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingHorizontal: 4 }}>
                   <Text style={styles.completedSectionTitle}>
@@ -174,12 +187,12 @@ export default function BacklogScreen() {
                   </Text>
                   <View style={[styles.badge, { backgroundColor: `${colors.success}1A` }]}>
                     <Text style={[styles.badgeText, { color: colors.success }]}>
-                      {tasks.filter(t => t.status === 'DONE').length}
+                      {filteredTasks.filter(t => t.status === 'DONE').length}
                     </Text>
                   </View>
                 </View>
                 <View style={{ gap: 12 }}>
-                  {tasks
+                  {filteredTasks
                     .filter(t => t.status === 'DONE')
                     .map((item) => (
                       <BacklogItem
@@ -207,6 +220,7 @@ function BacklogItem({
   const queryClient = useQueryClient();
   const { groups } = useGroupStore();
   const { user } = useAuth();
+  const { filter, toggleFilter } = useTaskFilterStore();
   const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
   const isDone = task.status === 'DONE';
   const titleLongPressHandledRef = useRef(false);
@@ -830,34 +844,43 @@ function BacklogItem({
             flexWrap: 'wrap', // Allow badges to wrap to next line
             marginLeft: 36, // Align with title (checkbox width + gap)
           }}>
-            {/* Group Badge */}
-            {task.group_id && (() => {
-              const groupName = groups.find(g => g.id === task.group_id)?.name;
-              return groupName ? (
-                <View style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  backgroundColor: colors.gray100,
-                  paddingHorizontal: 6,
-                  paddingVertical: 4,
-                  borderRadius: borderRadius.sm,
-                  flexShrink: 0,
-                }}>
-                  <Users size={10} color="#475569" strokeWidth={2} />
+            {/* Mine / Group label (tap to filter) */}
+            {(() => {
+              const isMine = !task.group_id;
+              const groupName = task.group_id ? groups.find(g => g.id === task.group_id)?.name : null;
+              const label = isMine ? 'Mine' : (groupName || '');
+              if (!label) return null;
+              const isToggled = isMine ? filter === 'mine' : filter === task.group_id;
+              const style = isMine ? getMineLabelStyle(isToggled) : getGroupLabelStyle(task.group_id!, groups, isToggled);
+              return (
+                <Pressable
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); toggleFilter(isMine ? 'mine' : task.group_id!); }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: style.bg,
+                    paddingHorizontal: 6,
+                    paddingVertical: 4,
+                    borderRadius: borderRadius.sm,
+                    flexShrink: 0,
+                    ...(style.borderWidth !== undefined && { borderWidth: style.borderWidth, borderColor: style.borderColor }),
+                  }}
+                >
+                  <Users size={10} color={style.text} strokeWidth={2} />
                   <Text style={{
                     fontSize: 10,
                     fontWeight: '500',
-                    color: '#475569', // Slate 600
+                    color: style.text,
                     marginLeft: 4,
-                    maxWidth: 100, // Limit group name width
+                    maxWidth: 100,
                   }}
                   numberOfLines={1}
                   ellipsizeMode="tail"
                   >
-                    {String(groupName)}
+                    {label}
                   </Text>
-                </View>
-              ) : null;
+                </Pressable>
+              );
             })()}
 
             {/* Assignee Avatars (for group tasks) - show for both TODO and DONE */}

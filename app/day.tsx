@@ -12,6 +12,8 @@ import { calculateRolloverInfo, calculateTaskProgress, toggleAllAssigneesComplet
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
+import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
+import { getMineLabelStyle, getGroupLabelStyle } from '@/lib/utils/task-label-colors';
 import type { TaskStatus, TaskWithRollover } from '@/lib/types';
 import { formatTimeRange } from '@/lib/utils/format-time-range';
 import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
@@ -49,7 +51,8 @@ export default function HomeScreen() {
     deleteTask: deleteTaskInStore,
   } = useCalendarStore();
   const { user } = useAuth();
-  const { fetchMyGroups } = useGroupStore();
+  const { groups, fetchMyGroups } = useGroupStore();
+  const { filter: taskFilter } = useTaskFilterStore();
   const router = useRouter();
   const flatListRef = useRef<FlatList>(null);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -78,8 +81,15 @@ export default function HomeScreen() {
   // Use weekly view range: -2 months ~ +4 months (same as weekly view)
   const { pastLimit, futureLimit } = getWeeklyCalendarRanges();
   
+  // Filter by Mine or group (toggle labels)
+  const filteredTasks = useMemo(() => {
+    if (!taskFilter) return tasks;
+    if (taskFilter === 'mine') return tasks.filter((t) => !t.group_id);
+    return tasks.filter((t) => t.group_id === taskFilter);
+  }, [tasks, taskFilter]);
+
   // Group tasks by date using Map (O(1) lookup) - same logic as weekly view
-  const tasksByDate = useMemo(() => groupTasksByDate(tasks), [tasks]);
+  const tasksByDate = useMemo(() => groupTasksByDate(filteredTasks), [filteredTasks]);
   
   // Generate date string array for FlatList data (no page objects needed)
   // Range: -2 months ~ +4 months (same as weekly view)
@@ -885,10 +895,11 @@ function TaskItem({
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { groups } = useGroupStore();
-  
+  const { filter, toggleFilter } = useTaskFilterStore();
+
   // Edit sheet state (must be at top level for React Hooks rules)
   const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
-  
+
   // Create groups map for O(1) lookup instead of O(n) find operations
   const groupsMap = useMemo(() => {
     const map = new Map<string, typeof groups[0]>();
@@ -1381,32 +1392,43 @@ function TaskItem({
             flexWrap: 'wrap', // Allow badges to wrap to next line
             marginLeft: 36, // Align with title (checkbox width + gap)
           }}>
-            {/* Group Badge */}
-            {groupName && (
-              <View style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: colors.gray100,
-                paddingHorizontal: 6,
-                paddingVertical: 4,
-                borderRadius: borderRadius.sm,
-                flexShrink: 0,
-              }}>
-                <Users size={10} color="#475569" strokeWidth={2} />
-                <Text style={{
-                  fontSize: 10,
-                  fontWeight: '500',
-                  color: '#475569', // Slate 600
-                  marginLeft: 4,
-                  maxWidth: 100, // Limit group name width
-                }}
-                numberOfLines={1}
-                ellipsizeMode="tail"
+            {/* Mine / Group label (tap to filter) */}
+            {(() => {
+              const isMine = !task.group_id;
+              const label = isMine ? 'Mine' : (groupName || '');
+              if (!label) return null;
+              const isToggled = isMine ? filter === 'mine' : filter === task.group_id;
+              const style = isMine ? getMineLabelStyle(isToggled) : getGroupLabelStyle(task.group_id!, groups, isToggled);
+              return (
+                <Pressable
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); toggleFilter(isMine ? 'mine' : task.group_id!); }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: style.bg,
+                    paddingHorizontal: 6,
+                    paddingVertical: 4,
+                    borderRadius: borderRadius.sm,
+                    flexShrink: 0,
+                    ...(style.borderWidth !== undefined && { borderWidth: style.borderWidth, borderColor: style.borderColor }),
+                  }}
                 >
-                  {groupName}
-                </Text>
-              </View>
-            )}
+                  <Users size={10} color={style.text} strokeWidth={2} />
+                  <Text style={{
+                    fontSize: 10,
+                    fontWeight: '500',
+                    color: style.text,
+                    marginLeft: 4,
+                    maxWidth: 100,
+                  }}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })()}
 
             {/* Assignee Avatars (for group tasks) - show for both TODO and DONE */}
             {isGroupTask && task.assignees && task.assignees.length > 0 && (
