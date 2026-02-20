@@ -15,7 +15,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { CalendarCheck, Check, Clock, Package, Trash2, Undo2, Users } from 'lucide-react-native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { showToast } from '@/utils/toast';
@@ -209,11 +209,14 @@ function BacklogItem({
   const { user } = useAuth();
   const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
   const isDone = task.status === 'DONE';
+  const titleLongPressHandledRef = useRef(false);
+  const toggleInFlightRef = useRef(false);
 
   const handleToggleComplete = async () => {
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (toggleInFlightRef.current) return;
+    toggleInFlightRef.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
-    // Optimistic update helper
     const updateTaskInCache = (oldData: any, updateFn: (t: any) => any) => {
       if (!oldData) return oldData;
       
@@ -233,6 +236,7 @@ function BacklogItem({
       return oldData;
     };
 
+    try {
     // Group task: use assignee logic
     if (task.group_id && task.assignees) {
       const myGroup = groups.find(g => g.id === task.group_id);
@@ -279,7 +283,6 @@ function BacklogItem({
           optimisticUpdate
         );
 
-        // API call in background - only invalidate on error
         try {
           const { toggleAllAssigneesCompletion } = await import('@/lib/api/tasks');
           const { error } = await toggleAllAssigneesCompletion(task.id, newCompletionStatus);
@@ -294,8 +297,6 @@ function BacklogItem({
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
           } else {
-            if (newCompletionStatus) showToast('success', 'Well done!', '👏 Task completed.');
-            else showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
             // Success: Invalidate to sync with server state
             queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
@@ -354,7 +355,6 @@ function BacklogItem({
           optimisticUpdate
         );
 
-        // API call in background - only invalidate on error
         try {
           const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
           const { error } = await toggleAssigneeCompletion(
@@ -376,9 +376,6 @@ function BacklogItem({
             const assigneesAfterToggle = task.assignees?.map((a: any) =>
               a.user_id === user.id ? { ...a, is_completed: newCompletionStatus } : a
             ) ?? [];
-            const taskBecameFullComplete = assigneesAfterToggle.length > 0 && assigneesAfterToggle.every((a: any) => a.is_completed);
-            if (taskBecameFullComplete) showToast('success', 'Well done!', '👏 Task completed.');
-            else if (!newCompletionStatus && task.status === 'DONE') showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
           }
           // Success: keep optimistic update, no invalidation needed
         } catch (error) {
@@ -430,24 +427,19 @@ function BacklogItem({
       optimisticUpdate
     );
 
-    // API call in background - only invalidate on error
     try {
       await updateTask({ id: task.id, ...updates });
-      
-      // Success: keep optimistic update, no invalidation needed
-      if (newStatus === 'DONE') {
-        showToast('success', 'Well done!', '👏 Task completed.');
-      } else if (task.status === 'DONE') {
-        showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
-      } else if (newStatus === 'TODO' && !task.due_date) {
+      if (newStatus === 'TODO' && !task.due_date) {
         showToast('success', 'Scheduled', 'Scheduled for today');
       }
     } catch (error) {
       console.error('Error updating task:', error);
-      // Rollback on error
       queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
       queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
       queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+    }
+    } finally {
+      toggleInFlightRef.current = false;
     }
   };
 
@@ -711,11 +703,20 @@ function BacklogItem({
               );
             })()}
 
-            {/* Task Title + Time Badge Container */}
+            {/* Task Title: short press = complete/incomplete, long press = edit */}
             <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
-              {/* Task Title - Clickable to open edit modal */}
               <Pressable
-                onPress={handleTitlePress}
+                onPress={() => {
+                  if (titleLongPressHandledRef.current) {
+                    titleLongPressHandledRef.current = false;
+                    return;
+                  }
+                  handleToggleComplete();
+                }}
+                onLongPress={() => {
+                  titleLongPressHandledRef.current = true;
+                  handleTitlePress();
+                }}
                 style={{ flexShrink: 1, minWidth: 0 }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 delayPressIn={0}

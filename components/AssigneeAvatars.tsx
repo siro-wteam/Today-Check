@@ -174,14 +174,6 @@ export function AssigneeAvatars({
         const assigneesAfterToggle = originalTask?.assignees?.map((a: any) =>
           a.user_id === assignee.user_id ? { ...a, is_completed: newCompletionStatus } : a
         ) ?? [];
-        const taskBecameFullComplete = newCompletionStatus && assigneesAfterToggle.length > 0 && assigneesAfterToggle.every((a: any) => a.is_completed);
-        if (taskBecameFullComplete) {
-          const { showToast } = await import('@/utils/toast');
-          showToast('success', 'Well done!', '👏 Task completed.');
-        } else if (!newCompletionStatus && originalTask?.status === 'DONE') {
-          const { showToast } = await import('@/utils/toast');
-          showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
-        }
       }
       // Success: keep optimistic update; no getTaskById merge (avoids late response overwriting)
     } catch (error) {

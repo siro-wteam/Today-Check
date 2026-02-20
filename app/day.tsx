@@ -8,7 +8,7 @@ import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { getWeeklyCalendarRanges, isDateInWeeklyRange } from '@/constants/calendar';
 import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
 import { validateStateTransition } from '@/lib/api/task-state-machine';
-import { calculateTaskProgress } from '@/lib/api/tasks';
+import { calculateRolloverInfo, calculateTaskProgress, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
@@ -895,7 +895,10 @@ function TaskItem({
     groups.forEach(g => map.set(g.id, g));
     return map;
   }, [groups]);
-  
+
+  const titleLongPressHandledRef = useRef(false);
+  const toggleInFlightRef = useRef(false);
+
   // Memoize expensive calculations
   const isCancelled = useMemo(() => task.status === 'CANCEL', [task.status]);
   const isDone = useMemo(() => task.status === 'DONE', [task.status]);
@@ -951,18 +954,20 @@ function TaskItem({
   // Change status (with validation)
   const changeStatus = async (targetStatus: TaskStatus) => {
     const validation = validateStateTransition(task.status, targetStatus);
-    
     if (!validation.valid) {
       showToast('error', 'Invalid Action', validation.error);
       return;
     }
+    if (toggleInFlightRef.current) return;
+    toggleInFlightRef.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
-    // Optimistic update helper
     const updateTaskInCache = (oldData: any, updateFn: (t: any) => any) => {
       if (!oldData) return oldData;
       return oldData.map((t: any) => t.id === task.id ? updateFn(t) : t);
     };
 
+    try {
     // Group task: use assignee logic
     if (task.group_id && task.assignees) {
       const myGroup = groups.find(g => g.id === task.group_id);
@@ -970,13 +975,8 @@ function TaskItem({
       const shouldComplete = targetStatus === 'DONE';
 
       if (myRole === 'OWNER' || myRole === 'ADMIN') {
-        // Owner and Admin: toggle all assignees (checkbox controls all)
-        
-        // Store original task for rollback
-        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
         const originalTask = useCalendarStore.getState().getTaskById(task.id);
-        
-        // Optimistically update React Query cache
+
         queryClient.setQueriesData(
           { queryKey: ['tasks', 'unified'], exact: false },
           (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
@@ -991,55 +991,25 @@ function TaskItem({
           }))
         );
 
-        // Optimistically update Calendar Store (for immediate UI update)
         if (originalTask) {
-          const { calculateRolloverInfo } = await import('@/lib/api/tasks');
           const updatedAssignees = originalTask.assignees?.map((a: any) => ({
             ...a,
             is_completed: shouldComplete,
             completed_at: shouldComplete ? new Date().toISOString() : null,
           })) || [];
-          
           const optimisticTask = {
             ...originalTask,
-            assignees: updatedAssignees, // Order preserved
+            assignees: updatedAssignees,
             status: targetStatus,
             completed_at: shouldComplete ? new Date().toISOString() : null,
           };
-          
           const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
 
-        try {
-          const { toggleAllAssigneesCompletion, getTaskById } = await import('@/lib/api/tasks');
-          const { error } = await toggleAllAssigneesCompletion(task.id, shouldComplete);
-          
-          if (error) {
-            console.error('[day.tsx] ❌ API call failed:', error);
-            // Rollback on error
-            if (originalTask) {
-              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
-              const tasksWithRollover = calculateRolloverInfo([originalTask]);
-              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-            }
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-          } else {
-            if (shouldComplete) showToast('success', 'Well done!', '👏 Task completed.');
-            else showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
-            // Fetch updated task and update store with server response
-            const { data: updatedTask, error: fetchError } = await getTaskById(task.id);
-            if (!fetchError && updatedTask) {
-              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
-              const tasksWithRollover = calculateRolloverInfo([updatedTask]);
-              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-            }
-          }
-        } catch (error) {
-          console.error('[day.tsx] ❌ Exception:', error);
-          // Rollback on exception
+        const { error } = await toggleAllAssigneesCompletion(task.id, shouldComplete);
+        if (error) {
           if (originalTask) {
-            const { calculateRolloverInfo } = await import('@/lib/api/tasks');
             const tasksWithRollover = calculateRolloverInfo([originalTask]);
             useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
           }
@@ -1051,12 +1021,8 @@ function TaskItem({
         if (!myAssignee) return;
 
         const shouldCompleteMyTask = !myAssignee.is_completed;
-
-        // Store original task for rollback
-        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
         const originalTask = useCalendarStore.getState().getTaskById(task.id);
 
-        // Optimistically update React Query cache
         queryClient.setQueriesData(
           { queryKey: ['tasks', 'unified'], exact: false },
           (oldData: any) => updateTaskInCache(oldData, (t: any) => {
@@ -1066,7 +1032,6 @@ function TaskItem({
                 : a
             );
             const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
-            
             return {
               ...t,
               assignees: updatedAssignees,
@@ -1076,60 +1041,34 @@ function TaskItem({
           })
         );
 
-        // Optimistically update Calendar Store (for immediate UI update)
         if (originalTask) {
-          const { calculateRolloverInfo } = await import('@/lib/api/tasks');
           const updatedAssignees = originalTask.assignees?.map((a: any) =>
             a.user_id === user.id
               ? { ...a, is_completed: shouldCompleteMyTask, completed_at: shouldCompleteMyTask ? new Date().toISOString() : null }
               : a
           ) || [];
-          
           const allCompleted = updatedAssignees.every((a: any) => a.is_completed) ?? false;
-          
           const optimisticTask: TaskWithRollover = {
             ...originalTask,
-            assignees: updatedAssignees, // Order preserved
+            assignees: updatedAssignees,
             status: (allCompleted ? 'DONE' : 'TODO') as TaskStatus,
             completed_at: allCompleted ? new Date().toISOString() : null,
           } as TaskWithRollover;
-          
           const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
 
-        const assigneesAfterToggle = originalTask?.assignees?.map((a: any) =>
-          a.user_id === user.id ? { ...a, is_completed: shouldCompleteMyTask } : a
-        ) ?? [];
-        const taskBecameFullComplete = assigneesAfterToggle.length > 0 && assigneesAfterToggle.every((a: any) => a.is_completed);
-
         try {
-          const { toggleAssigneeCompletion } = await import('@/lib/api/tasks');
-          const { error } = await toggleAssigneeCompletion(
-            task.id,
-            user.id,
-            myAssignee.is_completed
-          );
+          const { error } = await toggleAssigneeCompletion(task.id, user.id, myAssignee.is_completed);
           if (error) {
-            console.error('Error toggling assignee:', error);
-            // Rollback on error
             if (originalTask) {
-              const { calculateRolloverInfo } = await import('@/lib/api/tasks');
               const tasksWithRollover = calculateRolloverInfo([originalTask]);
               useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-          } else if (taskBecameFullComplete) {
-            showToast('success', 'Well done!', '👏 Task completed.');
-          } else if (!shouldCompleteMyTask && task.status === 'DONE') {
-            showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
           }
-          // Success: keep optimistic update; no getTaskById merge (avoids late response overwriting)
         } catch (error) {
-          console.error('Exception toggling assignee:', error);
-          // Rollback on exception
           if (originalTask) {
-            const { calculateRolloverInfo } = await import('@/lib/api/tasks');
             const tasksWithRollover = calculateRolloverInfo([originalTask]);
             useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
           }
@@ -1160,15 +1099,13 @@ function TaskItem({
 
     // Use store function (handles optimistic update and API call)
     await updateTaskInStore(task.id, updates);
-    if (targetStatus === 'DONE') showToast('success', 'Well done!', '👏 Task completed.');
-    else if (task.status === 'DONE') showToast('info', 'Marked incomplete', 'Task moved back to to-do.');
+    } finally {
+      toggleInFlightRef.current = false;
+    }
   };
 
   // Handle Checkbox Tap
-  const handleCheckboxPress = async () => {
-    // Toggle task status (including Future items)
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
+  const handleCheckboxPress = () => {
     if (isTodo) {
       changeStatus('DONE');
     } else if (isDone) {
@@ -1348,12 +1285,21 @@ function TaskItem({
               );
             })()}
 
-            {/* Task Title + Time Badge Container */}
+            {/* Task Title: short press = complete/incomplete, long press = edit */}
             <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 }}>
-              {/* Task Title - Pressable */}
               <Pressable
-                onPress={handleTitlePress}
-                style={{ flexShrink: 1, minWidth: 0 }} // minWidth: 0 to allow text truncation
+                onPress={() => {
+                  if (titleLongPressHandledRef.current) {
+                    titleLongPressHandledRef.current = false;
+                    return;
+                  }
+                  handleCheckboxPress();
+                }}
+                onLongPress={() => {
+                  titleLongPressHandledRef.current = true;
+                  handleTitlePress();
+                }}
+                style={{ flexShrink: 1, minWidth: 0 }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
               >
