@@ -16,10 +16,11 @@
 
 ---
 
-## 2. 구독 상태 전제
+## 2. 구독 상태 (적용 완료)
 
-- **저장**: 예) `profiles.subscription_tier` = `'free'` | `'paid'` (또는 별도 테이블 / 결제 연동).
-- **헬퍼**: `isSubscribed(userId): boolean` — 유료면 `true`, 제한 검사 전에 호출해 `true`면 검사 생략.
+- **저장**: `profiles.subscription_tier` = `'free'` | `'paid'` (기본값 `'free'`). 결제 연동은 추후 동일 컬럼/웹훅으로 갱신 가능.
+- **클라이언트**: `useSubscription()` 훅 → `{ tier, isSubscribed }`. `isSubscribed === true` 이면 유료(제한 없음).
+- **서버**: 제한 검사 시 `profiles.subscription_tier` 조회 후 `'paid'`면 검사 생략. (추후 `isSubscribed(userId)` 헬퍼 추가 가능.)
 
 ---
 

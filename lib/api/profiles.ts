@@ -6,18 +6,21 @@
 import { Platform } from 'react-native';
 import { supabase } from '../supabase';
 
+import type { SubscriptionTier } from '../types';
+
 // Global profile cache
-const profileCache = new Map<string, { id: string; nickname: string; avatar_url: string | null }>();
+const profileCache = new Map<string, { id: string; nickname: string; avatar_url: string | null; subscription_tier: SubscriptionTier }>();
 const profileCacheTimestamp = new Map<string, number>();
 const PROFILE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Pending requests map to prevent duplicate concurrent requests
-const pendingRequests = new Map<string, Promise<Map<string, { id: string; nickname: string; avatar_url: string | null }>>>();
+const pendingRequests = new Map<string, Promise<Map<string, { id: string; nickname: string; avatar_url: string | null; subscription_tier: SubscriptionTier }>>>();
 
 export interface ProfileData {
   id: string;
   nickname: string;
   avatar_url: string | null;
+  subscription_tier: SubscriptionTier;
 }
 
 /**
@@ -65,7 +68,7 @@ export async function fetchProfiles(userIds: string[]): Promise<Map<string, Prof
       try {
         const { data: profiles, error } = await supabase
           .from('profiles')
-          .select('id, nickname, avatar_url')
+          .select('id, nickname, avatar_url, subscription_tier')
           .in('id', uncachedUserIds);
 
         if (error) {
@@ -82,6 +85,7 @@ export async function fetchProfiles(userIds: string[]): Promise<Map<string, Prof
               id: profile.id,
               nickname: profile.nickname,
               avatar_url: profile.avatar_url,
+              subscription_tier: (profile.subscription_tier === 'paid' ? 'paid' : 'free') as SubscriptionTier,
             };
             profileCache.set(profile.id, profileData);
             profileCacheTimestamp.set(profile.id, now);

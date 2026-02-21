@@ -104,11 +104,15 @@ export interface SupabaseListResponse<T> {
   error: Error | null;
 }
 
+// Subscription tier (freemium). Payment integration can set 'paid' later.
+export type SubscriptionTier = 'free' | 'paid';
+
 // Profile Types
 export interface Profile {
   id: string; // User ID (references auth.users.id)
   nickname: string;
   avatarUrl: string | null;
+  subscriptionTier: SubscriptionTier;
   createdAt: string;
   updatedAt: string;
 }

@@ -34,8 +34,9 @@ const fetchProfile = async (userId: string): Promise<Profile | null> => {
   return {
     id: profileData.id,
     nickname: profileData.nickname,
-    avatar_url: profileData.avatar_url,
-    created_at: '',
+    avatarUrl: profileData.avatar_url,
+    subscriptionTier: profileData.subscription_tier ?? 'free',
+    createdAt: '',
     updatedAt: '',
   };
 };

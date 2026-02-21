@@ -6,13 +6,15 @@ import { NotificationSettingsModal } from '@/components/NotificationSettingsModa
 import { borderRadius, colors, spacing } from '@/constants/colors';
 import { getProfileStats, type ProfileStats } from '@/lib/api/profile-stats';
 import { signOut, useAuth } from '@/lib/hooks/use-auth';
+import { useSubscription } from '@/lib/hooks/use-subscription';
 import { useFocusEffect } from '@react-navigation/native';
-import { Edit2, LogOut, Mail, User as UserIcon } from 'lucide-react-native';
+import { Crown, Edit2, LogOut, Mail, User as UserIcon } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
 
 export default function ProfileScreen() {
   const { user, profile, updateProfile, refreshProfile } = useAuth();
+  const { tier, isSubscribed } = useSubscription();
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   const [isNotificationSettingsVisible, setIsNotificationSettingsVisible] = useState(false);
@@ -161,6 +163,30 @@ export default function ProfileScreen() {
               <Mail size={16} color={colors.textSub} />
               <Text style={{ fontSize: 14, color: colors.textSub }}>
                 {user?.email || 'No email'}
+              </Text>
+            </View>
+            {/* Subscription */}
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: spacing.sm,
+              marginTop: spacing.md,
+              paddingVertical: spacing.sm,
+              paddingHorizontal: spacing.md,
+              borderRadius: borderRadius.md,
+              backgroundColor: isSubscribed ? '#DBEAFE' : colors.gray100,
+              alignSelf: 'center',
+            }}>
+              {isSubscribed ? (
+                <Crown size={16} color={colors.primary} strokeWidth={2} />
+              ) : null}
+              <Text style={{
+                fontSize: 14,
+                fontWeight: '600',
+                color: isSubscribed ? colors.primary : colors.textSub,
+              }}>
+                {isSubscribed ? 'Paid' : 'Free'}
               </Text>
             </View>
           </View>
