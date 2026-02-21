@@ -8,6 +8,7 @@ import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { getWeeklyCalendarRanges, isDateInWeeklyRange } from '@/constants/calendar';
 import { borderRadius, colors, shadows } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
+import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
@@ -22,7 +23,7 @@ import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, forma
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { calculateRolloverInfo, duplicateTasksToNextWeek, moveTaskToBacklog, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Repeat, Trash2, Undo2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -33,6 +34,50 @@ const SCREEN_HEIGHT = Dimensions.get('window').height;
 const HEADER_HEIGHT = 60;
 const NAVIGATOR_HEIGHT = 70;
 const AVAILABLE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - NAVIGATOR_HEIGHT;
+
+// Module-level cache for backlog limit (used by swipe callback run in native context where closure is lost)
+let weekScreenBacklogLimit: { canAdd: boolean; message: string } = { canAdd: true, message: '' };
+// Closers for each row's Swipeable (taskId -> close). Updated when rendering; called after backlog action to close swipe.
+const weekScreenSwipeableClosers = new Map<string, () => void>();
+// Deps for backlog press handler (updated each render so handler can run in native context)
+let weekScreenBacklogDeps: {
+  updateTaskInStore: (id: string, u: { due_date: null; original_due_date: null }) => Promise<unknown>;
+  moveTaskToBacklog: (id: string) => Promise<{ error?: Error }>;
+  showToast: (type: string, title: string, msg?: string) => void;
+  queryClient: { invalidateQueries: (opts: { queryKey: string[] }) => void };
+} = null as any;
+
+async function weekScreenBacklogPressHandler(taskId: string) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+  const limit = weekScreenBacklogLimit;
+  const close = () => weekScreenSwipeableClosers.get(taskId)?.();
+  try {
+    if (!limit.canAdd) {
+      weekScreenBacklogDeps?.showToast('error', 'Limit', limit.message);
+      close();
+      return;
+    }
+    const d = weekScreenBacklogDeps;
+    if (!d) {
+      close();
+      return;
+    }
+    await d.updateTaskInStore(taskId, { due_date: null, original_due_date: null });
+    const { error } = await d.moveTaskToBacklog(taskId);
+    if (error) {
+      const errorMsg = error.message?.includes('permission') || (error as any).code === '42501'
+        ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
+        : 'Could not move to backlog';
+      d.showToast('error', 'Failed', errorMsg);
+      d.queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    } else {
+      d.showToast('success', 'Moved to backlog', 'Task moved to backlog.');
+      d.queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+    }
+  } finally {
+    close();
+  }
+}
 
 interface DailyGroup {
   date: string;
@@ -70,7 +115,19 @@ export default function WeekScreen() {
   const { filter: taskFilter, toggleFilter } = useTaskFilterStore();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
-  
+  const { canAddToBacklog, limitMessages } = useSubscriptionLimits();
+  weekScreenBacklogLimit = { canAdd: canAddToBacklog, message: limitMessages.backlog };
+  weekScreenBacklogDeps = {
+    updateTaskInStore,
+    moveTaskToBacklog,
+    showToast,
+    queryClient,
+  };
+
+  useEffect(() => () => {
+    weekScreenSwipeableClosers.clear();
+  }, []);
+
   // Initialize calendar only when user is ready (avoids empty tasks on first load)
   useEffect(() => {
     if (user?.id) {
@@ -635,12 +692,9 @@ export default function WeekScreen() {
         }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ flex: 1 }} />
-          <Text style={{ fontSize: 18, fontWeight: '600', color: colors.textMain }}>
-            {currentWeekDisplay}
-          </Text>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-            {!isCurrentWeek && (
+          {/* 왼쪽: 고정 너비 (Today 버튼 또는 빈 공간) — 오른쪽과 동일 너비로 날짜가 화면 정중앙에 오도록 */}
+          <View style={{ width: 72, alignItems: 'flex-start', justifyContent: 'center' }}>
+            {!isCurrentWeek ? (
               <Pressable
                 onPress={goToThisWeek}
                 disabled={isLoading}
@@ -648,7 +702,9 @@ export default function WeekScreen() {
                 style={{
                   backgroundColor: colors.primary,
                   paddingHorizontal: 10,
-                  paddingVertical: 6,
+                  height: 32,
+                  justifyContent: 'center',
+                  alignItems: 'center',
                   borderRadius: borderRadius.md,
                 }}
               >
@@ -656,23 +712,25 @@ export default function WeekScreen() {
                   Today
                 </Text>
               </Pressable>
-            )}
-            {(isCurrentWeek || isFutureWeek) && (
-              <Pressable
-                onPress={handleCopyWeekToNext}
-                disabled={copyInProgress || isLoading}
-                hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-                style={{
-                  backgroundColor: colors.primary,
-                  padding: 6,
-                  borderRadius: borderRadius.md,
-                  opacity: copyInProgress ? 0.6 : 1,
-                }}
-              >
-                <Repeat size={20} color={colors.primaryForeground} strokeWidth={2} />
-              </Pressable>
-            )}
+            ) : null}
           </View>
+          {/* 가운데: 날짜 범위 (화면 정중앙, 길게 누르면 복사) */}
+          <Pressable
+            style={{ flex: 1, justifyContent: 'center', paddingVertical: 8 }}
+            onLongPress={() => {
+              if (isCurrentWeek || isFutureWeek) {
+                if (copyInProgress || isLoading) return;
+                handleCopyWeekToNext();
+              }
+            }}
+            delayLongPress={400}
+          >
+            <Text style={{ fontSize: 18, fontWeight: '600', color: colors.textMain, textAlign: 'center' }}>
+              {currentWeekDisplay}
+            </Text>
+          </Pressable>
+          {/* 오른쪽: 왼쪽과 동일 너비(72) — 날짜가 화면 정중앙에 오도록 균형 */}
+          <View style={{ width: 72 }} />
         </View>
       </View>
       </View>
@@ -1201,7 +1259,13 @@ const DailyCard = React.memo(function DailyCard({
               const isLateCompletion = calculateLateCompletion(task);
               
               // Swipe actions: Completed → 미완료 / Not completed → Backlog | Delete
-              const renderRightActions = () => (
+              const renderRightActions = (
+                _progress: unknown,
+                _drag: unknown,
+                swipeable: { close: () => void } | undefined
+              ) => {
+                if (swipeable) weekScreenSwipeableClosers.set(task.id, () => swipeable.close());
+                return (
                 <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 2, marginBottom: index < visibleTasks.length - 1 ? 8 : 0 }}>
                   {isDone ? (
                     <Pressable
@@ -1220,21 +1284,7 @@ const DailyCard = React.memo(function DailyCard({
                     </Pressable>
                   ) : (
                     <Pressable
-                      onPress={async () => {
-                        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        await updateTaskInStore(task.id, { due_date: null, original_due_date: null });
-                        const { error } = await moveTaskToBacklog(task.id);
-                        if (error) {
-                          const errorMsg = error.message?.includes('permission') || error.code === '42501'
-                            ? 'Permission denied. Only OWNER/ADMIN can modify this task.'
-                            : 'Could not move to backlog';
-                          showToast('error', 'Failed', errorMsg);
-                          queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                        } else {
-                          showToast('success', 'Moved to backlog', 'Task moved to backlog.');
-                          queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-                        }
-                      }}
+                      onPress={() => weekScreenBacklogPressHandler(task.id)}
                       style={{
                         backgroundColor: '#3B82F6',
                         justifyContent: 'center',
@@ -1267,7 +1317,8 @@ const DailyCard = React.memo(function DailyCard({
                   </Pressable>
                 </View>
               );
-              
+              };
+
               return (
                 <Swipeable
                   key={task.id}
