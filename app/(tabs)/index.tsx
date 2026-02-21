@@ -386,8 +386,12 @@ export default function WeekScreen() {
     queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
   }, [queryClient]);
 
-  // Go to this week (today)
+  // Go to this week (today) — also sync selectedDate so day view opens to today
   const goToThisWeek = useCallback(() => {
+    const now = new Date();
+    const today = startOfDay(now);
+    setSelectedDate(today);
+
     const targetIndex = weekPagesMap.get(THIS_WEEK_START_STR);
     if (targetIndex !== undefined) {
       flatListRef.current?.scrollToIndex({
@@ -395,14 +399,15 @@ export default function WeekScreen() {
         animated: true,
       });
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      
+      setCurrentWeekStartStr(THIS_WEEK_START_STR);
+      currentWeekStartStrRef.current = THIS_WEEK_START_STR;
+
       // After scrolling to this week, scroll to today's date card
-      // Use a delay to ensure the week page is rendered and card positions are measured
       setTimeout(() => {
         scrollToTodayInWeek(THIS_WEEK_START_STR);
       }, 500);
     }
-  }, [weekPagesMap, THIS_WEEK_START_STR, scrollToTodayInWeek]);
+  }, [weekPagesMap, THIS_WEEK_START_STR, scrollToTodayInWeek, setSelectedDate]);
   
   // Handle date card press
   const handleDateCardPress = useCallback((dateStr: string) => {
@@ -427,6 +432,30 @@ export default function WeekScreen() {
       initializeCalendar();
     }, [initializeCalendar])
   );
+
+  // Web: when tab becomes visible (e.g. after bfcache), snap to this week if viewing a past week (fixes mobile web opening to old date)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const snapToThisWeekIfStale = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const now = new Date();
+      const today = startOfDay(now);
+      const thisWeekStart = format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const cur = currentWeekStartStrRef.current;
+      if (cur && cur < thisWeekStart) {
+        setCurrentWeekStartStr(thisWeekStart);
+        currentWeekStartStrRef.current = thisWeekStart;
+        setSelectedDate(today);
+      }
+      const storeDate = useCalendarStore.getState().selectedDate;
+      if (storeDate && startOfDay(storeDate) < today) {
+        setSelectedDate(today);
+      }
+    };
+    snapToThisWeekIfStale(); // run once on mount (fixes bfcache-restored state)
+    document.addEventListener('visibilitychange', snapToThisWeekIfStale);
+    return () => document.removeEventListener('visibilitychange', snapToThisWeekIfStale);
+  }, [setSelectedDate, setCurrentWeekStartStr]);
 
   // Copy visible week to next week (이번주 또는 미래주에서 해당 주 → 다음 주로 복사)
   const runCopyWeekToNext = useCallback(async () => {

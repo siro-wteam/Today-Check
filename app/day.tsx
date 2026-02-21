@@ -78,6 +78,29 @@ export default function HomeScreen() {
     if (!params.jumpToDate) return undefined;
     return Array.isArray(params.jumpToDate) ? params.jumpToDate[0] : params.jumpToDate;
   }, [params.jumpToDate]);
+
+  // Web: when opening day view without jumpToDate, if selectedDate is in the past (e.g. bfcache), snap to today
+  useEffect(() => {
+    if (jumpToDateStr) return;
+    const today = startOfDay(new Date());
+    const cur = useCalendarStore.getState().selectedDate;
+    if (cur && startOfDay(cur) < today) {
+      setSelectedDate(today);
+    }
+  }, [jumpToDateStr, setSelectedDate]);
+
+  // Web: on tab visible, if no jumpToDate and selectedDate is in the past, snap to today (mobile web bfcache fix)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined' || jumpToDateStr) return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const today = startOfDay(new Date());
+      const cur = useCalendarStore.getState().selectedDate;
+      if (cur && startOfDay(cur) < today) setSelectedDate(today);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [jumpToDateStr, setSelectedDate]);
   
   // Use weekly view range: -2 months ~ +4 months (same as weekly view)
   const { pastLimit, futureLimit } = getWeeklyCalendarRanges();
