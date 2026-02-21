@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -18,26 +18,60 @@ import { ModalCloseButton } from './ModalCloseButton';
 interface CreateGroupModalProps {
   visible: boolean;
   onClose: () => void;
-  onCreate: (name: string) => void;
+  /** Must return { success, error? }. Modal stays open until resolved; on failure, error is shown in modal and via toast. */
+  onCreate: (name: string) => void | Promise<{ success: boolean; error?: string }>;
+  canCreateGroup?: boolean;
+  limitMessage?: string;
 }
 
-export function CreateGroupModal({ visible, onClose, onCreate }: CreateGroupModalProps) {
+export function CreateGroupModal({ visible, onClose, onCreate, canCreateGroup = true, limitMessage }: CreateGroupModalProps) {
   const insets = useSafeAreaInsets();
   const [groupName, setGroupName] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleCreate = () => {
+  useEffect(() => {
+    if (visible) setSubmitError(null);
+  }, [visible]);
+
+  const handleCreate = async () => {
     if (!groupName.trim()) {
       showToast('error', 'Required', 'Please enter a group name');
       return;
     }
+    if (!canCreateGroup) {
+      showToast('error', 'Limit', limitMessage ?? 'Free plan: max 2 groups. Upgrade to add more.');
+      return;
+    }
 
-    onCreate(groupName.trim());
-    setGroupName('');
-    onClose();
+    setSubmitError(null);
+    setIsSubmitting(true);
+    try {
+      const result = await Promise.resolve(onCreate(groupName.trim()));
+      const success = result && typeof result === 'object' && (result as { success?: boolean }).success !== false;
+      const errorMsg = result && typeof result === 'object' ? (result as { error?: string }).error : undefined;
+
+      if (success) {
+        setGroupName('');
+        setSubmitError(null);
+        onClose();
+      } else {
+        const message = errorMsg || 'Failed to create group';
+        setSubmitError(message);
+        showToast('error', 'Error', message);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to create group';
+      setSubmitError(message);
+      showToast('error', 'Error', message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCancel = () => {
     setGroupName('');
+    setSubmitError(null);
     onClose();
   };
 
@@ -88,21 +122,28 @@ export function CreateGroupModal({ visible, onClose, onCreate }: CreateGroupModa
                   </Text>
                 </View>
 
+                {limitMessage && !canCreateGroup && (
+                  <Text style={styles.limitHint}>{limitMessage}</Text>
+                )}
+                {submitError ? (
+                  <Text style={styles.errorText}>{submitError}</Text>
+                ) : null}
                 {/* Action Buttons */}
                 <View style={styles.actions}>
                   <Pressable
                     onPress={handleCancel}
                     style={[styles.button, styles.cancelButton]}
+                    disabled={isSubmitting}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </Pressable>
 
                   <Pressable
                     onPress={handleCreate}
-                    style={[styles.button, styles.createButton, !groupName.trim() && styles.buttonDisabled]}
-                    disabled={!groupName.trim()}
+                    style={[styles.button, styles.createButton, (!groupName.trim() || !canCreateGroup || isSubmitting) && styles.buttonDisabled]}
+                    disabled={!groupName.trim() || !canCreateGroup || isSubmitting}
                   >
-                    <Text style={styles.createButtonText}>Create</Text>
+                    <Text style={styles.createButtonText}>{isSubmitting ? 'Creating…' : 'Create'}</Text>
                   </Pressable>
                 </View>
               </View>
@@ -185,6 +226,18 @@ const styles = StyleSheet.create({
     color: colors.textSub,
     textAlign: 'right',
     marginTop: 4,
+  },
+  limitHint: {
+    fontSize: 13,
+    color: colors.textSub,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 14,
+    color: colors.error,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   actions: {
     flexDirection: 'row',

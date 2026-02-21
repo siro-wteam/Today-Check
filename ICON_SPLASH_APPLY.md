@@ -16,7 +16,7 @@
 
 - **아이콘**: `./assets/images/icon.png` (iOS, 웹, Android 포그라운드)
 - **Android 적응형 아이콘**: 배경색 `#FFFFFF`, 포그라운드 `icon.png`
-- **스플래시**: `./assets/images/splash-screen.png`, 배경색 `#1E3A8A`
+- **스플래시**: `./assets/images/splash-screen.png` (파란 그라데이션 + 아이콘 + TodayCheck + 태그라인), `resizeMode`: `contain`, 배경색 `#1E3A8A`
 
 ## 3. 적용 절차 (아이콘/스플래시 바꾼 뒤)
 

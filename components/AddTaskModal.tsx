@@ -1,5 +1,6 @@
 import { borderRadius, colors } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
+import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -45,6 +46,8 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
   // Group task fields
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null); // null = personal task
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const dateInputRef = useRef<any>(null);
   const timeInputRef = useRef<any>(null);
@@ -56,17 +59,18 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
   const { groups, fetchMyGroups } = useGroupStore();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { canAddToBacklog, checkCanAddTaskToDate, refetchBacklog, isSubscribed } = useSubscriptionLimits();
 
   // Get current group's members
   const currentGroup = groups.find(g => g.id === selectedGroupId);
 
-  // Fetch groups when modal opens (ensure fresh data)
+  // Fetch groups and backlog count when modal opens (ensure fresh data)
   useEffect(() => {
     if (visible && user?.id) {
-      // Fetch groups to ensure we have latest data
       fetchMyGroups(user.id);
+      refetchBacklog();
     }
-  }, [visible, user?.id, fetchMyGroups]);
+  }, [visible, user?.id, fetchMyGroups, refetchBacklog]);
 
   // Set initial date when modal opens or initialDate changes
   useEffect(() => {
@@ -80,6 +84,10 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
       setDueDate(null);
     }
   }, [visible, initialDate]);
+
+  useEffect(() => {
+    if (visible) setSubmitError(null);
+  }, [visible]);
 
   // 기본 시간 계산: 현재시간 + 1시간, 분은 00분
   const getDefaultTime = () => {
@@ -142,34 +150,49 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
       return;
     }
 
+    // Subscription limits (free tier)
+    const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
+    setSubmitError(null);
+    if (!isSubscribed) {
+      if (!dueDateStr) {
+        if (!canAddToBacklog) {
+          const msg = 'Free plan: max 5 backlog items. Upgrade to add more.';
+          setSubmitError(msg);
+          showToast('error', 'Limit', msg);
+          return;
+        }
+      } else {
+        const { allowed, message } = await checkCanAddTaskToDate(dueDateStr);
+        if (!allowed) {
+          const msg = message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.';
+          setSubmitError(msg);
+          showToast('error', 'Limit', msg);
+          return;
+        }
+      }
+    }
+
     // Remove @mentions from title before saving (using actual selected assignee nicknames)
     let cleanedTitle = title;
-    
+
     // Remove each selected assignee's @mention exactly
     if (selectedGroupId && currentGroup) {
       selectedAssigneeIds.forEach(assigneeId => {
         const member = currentGroup.members.find(m => m.id === assigneeId);
         if (member) {
-          // Remove exact @nickname (escape special regex characters)
           const escapedNickname = member.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const mentionRegex = new RegExp(`@${escapedNickname}\\s*`, 'g');
           cleanedTitle = cleanedTitle.replace(mentionRegex, '');
         }
       });
     }
-    
-    // Clean up extra spaces and commas
+
     cleanedTitle = cleanedTitle
       .replace(/[,\s]+/g, ' ')
       .trim();
 
-    // date-fns format으로 로컬 타임존 기준 문자열 생성
-    const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
     const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
     const dueTimeEndStr = dueTimeEnd ? format(dueTimeEnd, 'HH:mm:ss') : null;
-
-    // Close immediately so save feels instant; run API in background
-    handleClose();
 
     const payload = selectedGroupId
       ? {
@@ -187,14 +210,25 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
           due_time_end: dueTimeEndStr,
         };
 
-    addTask(payload).then((result) => {
+    setIsSubmitting(true);
+    try {
+      const result = await addTask(payload);
       if (result.success) {
         queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
         queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        handleClose();
       } else {
-        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        const msg = result.error ?? '작업을 생성할 수 없습니다.';
+        setSubmitError(msg);
+        showToast('error', '생성 실패', msg);
       }
-    });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '작업을 생성할 수 없습니다.';
+      setSubmitError(msg);
+      showToast('error', '생성 실패', msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Toggle assignee selection
@@ -932,39 +966,44 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
 
               {/* Action Buttons - DatePicker/시간 모달이 열려있지 않을 때만 표시 */}
               {!showDatePicker && !showTimePicker && !showEndTimePicker && (
-                <View className="flex-row gap-3 mt-2">
-                  <Pressable
-                    onPress={() => {
-                      if (Platform.OS === 'ios') {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                      }
-                      handleClose();
-                    }}
-                    className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl py-4 items-center"
-                    disabled={false}
-                  >
-                    <Text className="text-gray-700 dark:text-gray-300 font-semibold">
-                      Cancel
+                <>
+                  {submitError ? (
+                    <Text className="text-red-600 dark:text-red-400 text-center text-sm mt-2 mb-1">
+                      {submitError}
                     </Text>
-                  </Pressable>
+                  ) : null}
+                  <View className="flex-row gap-3 mt-2">
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        }
+                        handleClose();
+                      }}
+                      className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl py-4 items-center"
+                      disabled={isSubmitting}
+                    >
+                      <Text className="text-gray-700 dark:text-gray-300 font-semibold">
+                        Cancel
+                      </Text>
+                    </Pressable>
 
-                  <Pressable
-                    onPress={() => {
-                      if (Platform.OS === 'ios') {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                      }
-                      handleSave();
-                    }}
-                    className={`flex-1 bg-primary rounded-xl py-4 items-center ${
-                      ''
-                    }`}
-                    disabled={false}
-                  >
-                    <Text className="text-white font-semibold">
-                      {'Save'}
-                    </Text>
-                  </Pressable>
-                </View>
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === 'ios') {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        }
+                        handleSave();
+                      }}
+                      className={`flex-1 bg-primary rounded-xl py-4 items-center ${isSubmitting ? 'opacity-70' : ''}`}
+                      disabled={isSubmitting}
+                    >
+                      <Text className="text-white font-semibold">
+                        {isSubmitting ? 'Saving…' : 'Save'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </>
               )}
             </View>
           </Pressable>

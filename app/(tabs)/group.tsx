@@ -2,6 +2,7 @@ import { CreateGroupModal } from '@/components/CreateGroupModal';
 import { JoinGroupModal } from '@/components/JoinGroupModal';
 import { borderRadius, colors, shadows } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
+import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { showToast } from '@/utils/toast';
 import * as Haptics from 'expo-haptics';
@@ -27,6 +28,7 @@ export default function GroupScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { groups, createGroup, joinGroup, fetchMyGroups, loading } = useGroupStore();
+  const { canCreateGroup, refetchGroupCount, limitMessages } = useSubscriptionLimits();
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [isJoinModalVisible, setIsJoinModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,6 +48,7 @@ export default function GroupScreen() {
     useCallback(() => {
       if (user?.id) {
         fetchMyGroups(user.id);
+        refetchGroupCount();
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id])
@@ -63,19 +66,16 @@ export default function GroupScreen() {
     }
   }, [user?.id, fetchMyGroups]);
 
-  const handleCreateGroup = async (name: string) => {
+  const handleCreateGroup = async (name: string): Promise<{ success: boolean; error?: string }> => {
     if (!user) {
       showToast('error', 'Error', 'Please log in to create a group');
-      return;
+      return { success: false, error: 'Please log in to create a group' };
     }
 
     const { success, error } = await createGroup(name, user.id);
-    
-    if (success) {
-      // Modal will be closed by CreateGroupModal
-    } else {
-      showToast('error', 'Error', error || 'Failed to create group');
-    }
+    if (success) return { success: true };
+    const message = error || 'Failed to create group';
+    return { success: false, error: message };
   };
 
   const handleJoinGroup = async (inviteCode: string) => {
@@ -156,11 +156,16 @@ export default function GroupScreen() {
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              if (!canCreateGroup) {
+                showToast('error', 'Limit', limitMessages.groups);
+                return;
+              }
               setIsCreateModalVisible(true);
             }}
             style={({ pressed }) => [
               styles.addButton,
               pressed && { opacity: 0.7 },
+              !canCreateGroup && { opacity: 0.6 },
             ]}
             hitSlop={{ top: 24, bottom: 24, left: 24, right: 24 }}
           >
@@ -300,6 +305,8 @@ export default function GroupScreen() {
         visible={isCreateModalVisible}
         onClose={() => setIsCreateModalVisible(false)}
         onCreate={handleCreateGroup}
+        canCreateGroup={canCreateGroup}
+        limitMessage={limitMessages.groups}
       />
 
       {/* Join Group Modal */}

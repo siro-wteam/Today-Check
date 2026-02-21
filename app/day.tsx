@@ -10,6 +10,7 @@ import { borderRadius, colors, shadows, spacing } from '@/constants/colors';
 import { validateStateTransition } from '@/lib/api/task-state-machine';
 import { calculateRolloverInfo, calculateTaskProgress, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
+import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
@@ -567,18 +568,8 @@ export default function HomeScreen() {
               ]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                {/* Date Text and Today Button */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                  <Text
-                    style={{
-                      fontSize: 18,
-                      fontWeight: '600',
-                      color: isTodayPage ? colors.primary : colors.textMain,
-                    }}
-                  >
-                    {isTodayPage ? `Today · ${format(date, 'MMM d (EEE)')}` : format(date, 'MMM d (EEE)')}
-                  </Text>
-                  {/* Show "Today" button for past/future dates */}
+                {/* 오늘로 이동 버튼(날짜 왼쪽) + 날짜 텍스트, 왼쪽 정렬 */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-start' }}>
                   {!isTodayPage && (
                     <Pressable
                       onPress={goToToday}
@@ -594,6 +585,15 @@ export default function HomeScreen() {
                       </Text>
                     </Pressable>
                   )}
+                  <Text
+                    style={{
+                      fontSize: 18,
+                      fontWeight: '600',
+                      color: isTodayPage ? colors.primary : colors.textMain,
+                    }}
+                  >
+                    {isTodayPage ? `Today · ${format(date, 'MMM d (EEE)')}` : format(date, 'MMM d (EEE)')}
+                  </Text>
                 </View>
 
                 {/* Navigation Arrows */}
@@ -896,6 +896,7 @@ function TaskItem({
   const { user } = useAuth();
   const { groups } = useGroupStore();
   const { filter, toggleFilter } = useTaskFilterStore();
+  const { canAddToBacklog, limitMessages } = useSubscriptionLimits();
 
   // Edit sheet state (must be at top level for React Hooks rules)
   const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
@@ -1157,7 +1158,12 @@ function TaskItem({
   // Send to Backlog (remove due_date)
   const handleSendToBacklog = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
+
+    if (!canAddToBacklog) {
+      showToast('error', 'Limit', limitMessages.backlog);
+      return;
+    }
+
     // Use store function (handles optimistic update and API call)
     const result = await updateTaskInStore(task.id, {
       due_date: null,

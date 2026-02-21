@@ -8,6 +8,7 @@ import { borderRadius, colors, shadows } from '@/constants/colors';
 import { deleteTask, updateTask } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useBacklogTasks } from '@/lib/hooks/use-backlog-tasks';
+import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
 import type { Task } from '@/lib/types';
@@ -221,6 +222,7 @@ function BacklogItem({
   const { groups } = useGroupStore();
   const { user } = useAuth();
   const { filter, toggleFilter } = useTaskFilterStore();
+  const { checkCanAddTaskToDate, isSubscribed } = useSubscriptionLimits();
   const [isEditSheetVisible, setIsEditSheetVisible] = useState(false);
   const isDone = task.status === 'DONE';
   const titleLongPressHandledRef = useRef(false);
@@ -322,19 +324,25 @@ function BacklogItem({
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
           } else {
             // When completing from backlog (no due_date), persist due_date/original_due_date to today
-            // so that uncomplete keeps the task on "today" instead of moving to backlog
             if (newCompletionStatus && !task.due_date) {
+              if (!isSubscribed) {
+                const { allowed, message } = await checkCanAddTaskToDate(todayStr);
+                if (!allowed) {
+                  showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
+                  queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+                  queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+                  return;
+                }
+              }
               await updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr });
               showToast('success', 'Moved to today', 'Task completed and moved to today.');
             }
-            // Success: Invalidate to sync with server state
             queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
           }
         } catch (error) {
           console.error('Exception toggling all assignees:', error);
-          // Rollback calendar store and queries
           const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
           useCalendarStore.getState().mergeTasksIntoStore([task]);
           queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
@@ -416,18 +424,23 @@ function BacklogItem({
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
             queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
           } else {
-            // When completing from backlog (no due_date), persist due_date/original_due_date to today
-            // so that uncomplete keeps the task on "today" instead of moving to backlog
             if (memberAllCompleted && !task.due_date) {
               const todayStr = format(new Date(), 'yyyy-MM-dd');
+              if (!isSubscribed) {
+                const { allowed, message } = await checkCanAddTaskToDate(todayStr);
+                if (!allowed) {
+                  showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
+                  queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+                  queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+                  return;
+                }
+              }
               await updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr });
               showToast('success', 'Moved to today', 'Task completed and moved to today.');
             }
-            // Success: keep optimistic update, no invalidation needed
           }
         } catch (error) {
           console.error('Exception toggling assignee:', error);
-          // Rollback calendar store and queries
           const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
           useCalendarStore.getState().mergeTasksIntoStore([task]);
           queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
@@ -443,14 +456,20 @@ function BacklogItem({
     const updates: any = { status: newStatus };
     const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-    // If unchecking (DONE -> TODO) and task has no due_date, assign today's date
     if (newStatus === 'TODO' && !task.due_date) {
       updates.due_date = todayStr;
       updates.original_due_date = todayStr;
     }
 
-    // Backlog complete (TODO -> DONE, due_date was null): set due_date/original_due_date to today so task appears in today's list
+    // Backlog complete (TODO -> DONE, due_date was null): set due_date to today
     if (newStatus === 'DONE' && !task.due_date) {
+      if (!isSubscribed) {
+        const { allowed, message } = await checkCanAddTaskToDate(todayStr);
+        if (!allowed) {
+          showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
+          return;
+        }
+      }
       updates.due_date = todayStr;
       updates.original_due_date = todayStr;
     }
@@ -538,8 +557,15 @@ function BacklogItem({
   // Schedule for today - set due_date to today
   const handleScheduleForToday = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
+
     const today = format(new Date(), 'yyyy-MM-dd');
+    if (!isSubscribed) {
+      const { allowed, message } = await checkCanAddTaskToDate(today);
+      if (!allowed) {
+        showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
+        return;
+      }
+    }
 
     // Optimistic update: Remove from backlog query
     const optimisticUpdate = (oldData: any) => {

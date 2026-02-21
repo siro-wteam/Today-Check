@@ -1,6 +1,7 @@
 import { borderRadius, colors } from '@/constants/colors';
 import { getTaskById, moveTaskToBacklog, updateTask, updateTaskAssignees } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
+import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { Task } from '@/lib/types';
@@ -29,6 +30,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   const { user } = useAuth();
   const { updateTask: updateTaskInStore, mergeTasksIntoStore, deleteTask: deleteTaskInStore } = useCalendarStore();
   const queryClient = useQueryClient();
+  const { canAddToBacklog, checkCanAddTaskToDate, isSubscribed } = useSubscriptionLimits();
   
   // Form state
   const [title, setTitle] = useState(task.title || '');
@@ -140,7 +142,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   const canDelete = canEdit;
 
   // Check if task can be moved to backlog (must have due_date and be TODO status)
-  const canMoveToBacklog = task.due_date !== null && task.due_date !== undefined && task.status === 'TODO';
+  const canMoveToBacklog = task.due_date !== null && task.due_date !== undefined && task.status === 'TODO' && canAddToBacklog;
 
   // Completed tasks: read-only in edit modal (user must mark incomplete to edit)
   const isCompleted = task.status === 'DONE';
@@ -237,6 +239,11 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
     const confirmed = await confirmMove();
     if (!confirmed) return;
 
+    if (!canAddToBacklog) {
+      showToast('error', 'Limit', 'Free plan: max 5 backlog items. Upgrade to add more.');
+      return;
+    }
+
     try {
       // Create optimistic task with due_date and original_due_date cleared
       const optimisticTask: Task = {
@@ -312,8 +319,25 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       return; // Read-only when completed
     }
 
-    // Format dates and build payload
     const dueDateStr = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
+
+    // Subscription limits (free tier)
+    if (!isSubscribed) {
+      if (!dueDateStr) {
+        if (!canAddToBacklog) {
+          showToast('error', 'Limit', 'Free plan: max 5 backlog items. Upgrade to add more.');
+          return;
+        }
+      } else {
+        const { allowed, message } = await checkCanAddTaskToDate(dueDateStr);
+        if (!allowed) {
+          showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
+          return;
+        }
+      }
+    }
+
+    // Format times and build payload
     const dueTimeStr = dueTime ? format(dueTime, 'HH:mm:ss') : null;
     const dueTimeEndStr = dueTimeEnd ? format(dueTimeEnd, 'HH:mm:ss') : null;
     const wasBacklog = !task.due_date;
