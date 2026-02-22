@@ -89,17 +89,24 @@ export default function HomeScreen() {
     }
   }, [jumpToDateStr, setSelectedDate]);
 
-  // Web: on tab visible, if no jumpToDate and selectedDate is in the past, snap to today (mobile web bfcache fix)
+  // Web: on tab visible or page restored from bfcache (iOS), if no jumpToDate and selectedDate in past → snap to today
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined' || jumpToDateStr) return;
-    const onVisible = () => {
+    const snapToTodayIfStale = () => {
       if (document.visibilityState !== 'visible') return;
       const today = startOfDay(new Date());
       const cur = useCalendarStore.getState().selectedDate;
       if (cur && startOfDay(cur) < today) setSelectedDate(today);
     };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', snapToTodayIfStale);
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) snapToTodayIfStale();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', snapToTodayIfStale);
+      window.removeEventListener('pageshow', onPageShow);
+    };
   }, [jumpToDateStr, setSelectedDate]);
   
   // Use weekly view range: -2 months ~ +4 months (same as weekly view)
@@ -134,7 +141,7 @@ export default function HomeScreen() {
   const startY = useSharedValue(0);
   const DRAG_THRESHOLD = 100;
   
-  // Calculate target date index
+  // Calculate target date index (when no jumpToDate: prefer today if selectedDate is in the past — fixes iOS stale store)
   const getTargetDateIndex = useCallback(() => {
     if (dateStrings.length === 0) return 0;
     
@@ -144,15 +151,21 @@ export default function HomeScreen() {
       if (index !== -1) return index;
     }
     
-    // Priority 2: selectedDate
+    const today = startOfDay(new Date());
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const todayIndex = dateStrings.indexOf(todayStr);
+
+    // Priority 2: selectedDate, but if it's in the past use today (iOS can have stale selectedDate after "Today" tap)
     const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+    if (startOfDay(selectedDate) >= today) {
+      const index = dateStrings.indexOf(selectedDateStr);
+      if (index !== -1) return index;
+    }
+    if (todayIndex !== -1) return todayIndex;
+
+    // Priority 3: selectedDate even if past (e.g. viewing history)
     const index = dateStrings.indexOf(selectedDateStr);
     if (index !== -1) return index;
-    
-    // Priority 3: Today
-    const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
-    const todayIndex = dateStrings.indexOf(todayStr);
-    if (todayIndex !== -1) return todayIndex;
     
     // Fallback: middle
     return Math.floor(dateStrings.length / 2);

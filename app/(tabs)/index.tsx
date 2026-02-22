@@ -433,7 +433,7 @@ export default function WeekScreen() {
     }, [initializeCalendar])
   );
 
-  // Web: when tab becomes visible (e.g. after bfcache), snap to this week if viewing a past week (fixes mobile web opening to old date)
+  // Web: when tab becomes visible or page restored from bfcache (iOS), snap to this week if viewing past
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const snapToThisWeekIfStale = () => {
@@ -454,7 +454,15 @@ export default function WeekScreen() {
     };
     snapToThisWeekIfStale(); // run once on mount (fixes bfcache-restored state)
     document.addEventListener('visibilitychange', snapToThisWeekIfStale);
-    return () => document.removeEventListener('visibilitychange', snapToThisWeekIfStale);
+    // iOS: bfcache restore often doesn't fire visibilitychange; pageshow(persisted) is reliable
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) snapToThisWeekIfStale();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', snapToThisWeekIfStale);
+      window.removeEventListener('pageshow', onPageShow);
+    };
   }, [setSelectedDate, setCurrentWeekStartStr]);
 
   // Copy visible week to next week (이번주 또는 미래주에서 해당 주 → 다음 주로 복사)
