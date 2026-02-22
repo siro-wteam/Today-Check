@@ -5,22 +5,27 @@ import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { NotificationSettingsModal } from '@/components/NotificationSettingsModal';
 import { borderRadius, colors, spacing } from '@/constants/colors';
 import { getProfileStats, type ProfileStats } from '@/lib/api/profile-stats';
+import { subscriptionTestActivate, subscriptionTestDeactivate } from '@/lib/api/profiles';
 import { signOut, useAuth } from '@/lib/hooks/use-auth';
 import { useSubscription } from '@/lib/hooks/use-subscription';
 import { useFocusEffect } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { Crown, Edit2, LogOut, Mail, User as UserIcon } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, SafeAreaView, ScrollView, Text, View } from 'react-native';
+import { showToast } from '@/utils/toast';
 
 export default function ProfileScreen() {
   const { user, profile, updateProfile, refreshProfile } = useAuth();
   const { tier, isSubscribed } = useSubscription();
+  const queryClient = useQueryClient();
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   const [isNotificationSettingsVisible, setIsNotificationSettingsVisible] = useState(false);
   const [isAboutModalVisible, setIsAboutModalVisible] = useState(false);
   const [profileStats, setProfileStats] = useState<ProfileStats | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [isSubscriptionActionLoading, setIsSubscriptionActionLoading] = useState(false);
 
   // Load profile stats when user is ready
   useEffect(() => {
@@ -188,6 +193,86 @@ export default function ProfileScreen() {
               }}>
                 {isSubscribed ? 'Paid' : 'Free'}
               </Text>
+            </View>
+
+            {/* Subscription test (remove when payment is integrated) */}
+            <View style={{
+              marginTop: spacing.lg,
+              paddingTop: spacing.lg,
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+              gap: spacing.sm,
+            }}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textSub, marginBottom: spacing.xs }}>
+                구독 테스트
+              </Text>
+              {profile?.subscriptionExpiresAt && profile?.subscriptionProvider === 'test' ? (
+                <Text style={{ fontSize: 12, color: colors.textSub, marginBottom: spacing.sm }}>
+                  만료: {new Date(profile.subscriptionExpiresAt).toLocaleDateString('ko-KR')}
+                </Text>
+              ) : null}
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                {!isSubscribed ? (
+                  <Pressable
+                    onPress={async () => {
+                      if (isSubscriptionActionLoading) return;
+                      setIsSubscriptionActionLoading(true);
+                      const { error } = await subscriptionTestActivate();
+                      if (error) {
+                        showToast('error', '구독하기 실패', error);
+                      } else {
+                        await refreshProfile();
+                        queryClient.invalidateQueries({ queryKey: ['subscription-limits'] });
+                        showToast('success', '구독 활성화', '테스트 구독이 활성화되었습니다.');
+                      }
+                      setIsSubscriptionActionLoading(false);
+                    }}
+                    disabled={isSubscriptionActionLoading}
+                    style={{
+                      flex: 1,
+                      paddingVertical: spacing.sm,
+                      paddingHorizontal: spacing.md,
+                      borderRadius: borderRadius.md,
+                      backgroundColor: colors.primary,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.primaryForeground }}>
+                      {isSubscriptionActionLoading ? '처리 중…' : '구독하기'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {isSubscribed ? (
+                  <Pressable
+                    onPress={async () => {
+                      if (isSubscriptionActionLoading) return;
+                      setIsSubscriptionActionLoading(true);
+                      const { error } = await subscriptionTestDeactivate();
+                      if (error) {
+                        showToast('error', '구독해제 실패', error);
+                      } else {
+                        await refreshProfile();
+                        queryClient.invalidateQueries({ queryKey: ['subscription-limits'] });
+                        showToast('success', '구독 해제', '테스트 구독이 해제되었습니다.');
+                      }
+                      setIsSubscriptionActionLoading(false);
+                    }}
+                    disabled={isSubscriptionActionLoading}
+                    style={{
+                      flex: 1,
+                      paddingVertical: spacing.sm,
+                      paddingHorizontal: spacing.md,
+                      borderRadius: borderRadius.md,
+                      backgroundColor: colors.gray200,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+                      {isSubscriptionActionLoading ? '처리 중…' : '구독해제'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           </View>
 

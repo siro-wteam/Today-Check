@@ -8,19 +8,32 @@ import { supabase } from '../supabase';
 
 import type { SubscriptionTier } from '../types';
 
+export interface ProfileDataRow {
+  id: string;
+  nickname: string;
+  avatar_url: string | null;
+  subscription_tier: SubscriptionTier;
+  subscription_expires_at: string | null;
+  subscription_external_id: string | null;
+  subscription_provider: string | null;
+}
+
 // Global profile cache
-const profileCache = new Map<string, { id: string; nickname: string; avatar_url: string | null; subscription_tier: SubscriptionTier }>();
+const profileCache = new Map<string, ProfileDataRow>();
 const profileCacheTimestamp = new Map<string, number>();
 const PROFILE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Pending requests map to prevent duplicate concurrent requests
-const pendingRequests = new Map<string, Promise<Map<string, { id: string; nickname: string; avatar_url: string | null; subscription_tier: SubscriptionTier }>>>();
+const pendingRequests = new Map<string, Promise<Map<string, ProfileData>>>();
 
 export interface ProfileData {
   id: string;
   nickname: string;
   avatar_url: string | null;
   subscription_tier: SubscriptionTier;
+  subscription_expires_at: string | null;
+  subscription_external_id: string | null;
+  subscription_provider: string | null;
 }
 
 /**
@@ -68,7 +81,7 @@ export async function fetchProfiles(userIds: string[]): Promise<Map<string, Prof
       try {
         const { data: profiles, error } = await supabase
           .from('profiles')
-          .select('id, nickname, avatar_url, subscription_tier')
+          .select('id, nickname, avatar_url, subscription_tier, subscription_expires_at, subscription_external_id, subscription_provider')
           .in('id', uncachedUserIds);
 
         if (error) {
@@ -79,15 +92,17 @@ export async function fetchProfiles(userIds: string[]): Promise<Map<string, Prof
         const resultMap = new Map<string, ProfileData>();
         
         if (profiles) {
-          // Update cache and result map
           profiles.forEach(profile => {
             const profileData: ProfileData = {
               id: profile.id,
               nickname: profile.nickname,
               avatar_url: profile.avatar_url,
               subscription_tier: (profile.subscription_tier === 'paid' ? 'paid' : 'free') as SubscriptionTier,
+              subscription_expires_at: profile.subscription_expires_at ?? null,
+              subscription_external_id: profile.subscription_external_id ?? null,
+              subscription_provider: profile.subscription_provider ?? null,
             };
-            profileCache.set(profile.id, profileData);
+            profileCache.set(profile.id, profileData as ProfileDataRow);
             profileCacheTimestamp.set(profile.id, now);
             resultMap.set(profile.id, profileData);
           });
@@ -130,6 +145,26 @@ export function clearProfileCache() {
   profileCache.clear();
   profileCacheTimestamp.clear();
   pendingRequests.clear();
+}
+
+/**
+ * Test only: set current user subscription to paid (1 month). Remove when payment is integrated.
+ */
+export async function subscriptionTestActivate(): Promise<{ error: string | null }> {
+  const { error } = await supabase.rpc('subscription_test_activate');
+  if (error) return { error: error.message };
+  clearProfileCache();
+  return { error: null };
+}
+
+/**
+ * Test only: set current user subscription to free. Remove when payment is integrated.
+ */
+export async function subscriptionTestDeactivate(): Promise<{ error: string | null }> {
+  const { error } = await supabase.rpc('subscription_test_deactivate');
+  if (error) return { error: error.message };
+  clearProfileCache();
+  return { error: null };
 }
 
 /**

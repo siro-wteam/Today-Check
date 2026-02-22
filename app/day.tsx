@@ -195,29 +195,24 @@ export default function HomeScreen() {
         : format(date, 'MMM d (EEE)'));
     }
   }, [hasInitialized, dateStrings.length, targetDateIndex, dateStrings]);
-  
-  // Handle jumpToDate param changes
+
+  // When opening with jumpToDate (e.g. clicked today in weekly view), scroll to that date — single delayed scroll, no animation (iOS)
   useEffect(() => {
     if (isUserSwipingRef.current || !jumpToDateStr || dateStrings.length === 0) return;
-    
     const targetIndex = dateStrings.indexOf(jumpToDateStr);
-    if (targetIndex !== -1 && targetIndex !== currentDateIndex) {
-      setCurrentDateIndex(targetIndex);
-      const date = parseISO(jumpToDateStr);
-      const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
-      const isToday = jumpToDateStr === todayStr;
-      setCurrentDateDisplay(isToday 
-        ? `Today · ${format(date, 'MMM d (EEE)')}` 
-        : format(date, 'MMM d (EEE)'));
-      
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({
-          index: targetIndex,
-          animated: true,
-        });
-      }, 100);
-    }
-  }, [jumpToDateStr, dateStrings, currentDateIndex]);
+    if (targetIndex === -1) return;
+    setCurrentDateIndex(targetIndex);
+    const date = parseISO(jumpToDateStr);
+    const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
+    const isToday = jumpToDateStr === todayStr;
+    setCurrentDateDisplay(isToday
+      ? `Today · ${format(date, 'MMM d (EEE)')}`
+      : format(date, 'MMM d (EEE)'));
+    const t = setTimeout(() => {
+      flatListRef.current?.scrollToIndex({ index: targetIndex, animated: false });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [jumpToDateStr, dateStrings]);
 
   // Track current visible page and update selectedDate
   const previousDateIndexRef = useRef<number>(-1);
@@ -868,7 +863,7 @@ export default function HomeScreen() {
             offset: (Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH) * index,
             index,
           })}
-          initialScrollIndex={initialScrollIndexRef.current}
+          initialScrollIndex={initialScrollIndexRef.current ?? targetDateIndex}
           onScrollToIndexFailed={(info) => {
             // Retry scrolling after a delay
             setTimeout(() => {

@@ -154,7 +154,7 @@ export default function WeekScreen() {
     const weekStart = startOfWeek(today, { weekStartsOn: 1 });
     return format(weekStart, 'yyyy-MM-dd');
   }, []);
-  
+
   // Use weekStartStr as source of truth (not index)
   const [currentWeekStartStr, setCurrentWeekStartStr] = useState<string>(THIS_WEEK_START_STR);
   const currentWeekStartStrRef = useRef<string>(THIS_WEEK_START_STR);
@@ -255,7 +255,7 @@ export default function WeekScreen() {
   const isCurrentWeek = currentWeekStartStr === THIS_WEEK_START_STR;
   const isPastWeek = currentWeekStartStr < THIS_WEEK_START_STR;
   const isFutureWeek = currentWeekStartStr > THIS_WEEK_START_STR;
-  
+
   // Initial scroll index (this week)
   const initialScrollIndex = weekPagesMap.get(THIS_WEEK_START_STR) || 0;
   
@@ -433,7 +433,7 @@ export default function WeekScreen() {
     }, [initializeCalendar])
   );
 
-  // Web: when tab becomes visible or page restored from bfcache (iOS), snap to this week if viewing past
+  // Web: when state is past (bfcache), only update state to this week — no scroll (scroll was causing move to past)
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const snapToThisWeekIfStale = () => {
@@ -452,9 +452,8 @@ export default function WeekScreen() {
         setSelectedDate(today);
       }
     };
-    snapToThisWeekIfStale(); // run once on mount (fixes bfcache-restored state)
+    snapToThisWeekIfStale();
     document.addEventListener('visibilitychange', snapToThisWeekIfStale);
-    // iOS: bfcache restore often doesn't fire visibilitychange; pageshow(persisted) is reliable
     const onPageShow = (e: PageTransitionEvent) => {
       if (e.persisted) snapToThisWeekIfStale();
     };

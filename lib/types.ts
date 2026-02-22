@@ -113,6 +113,12 @@ export interface Profile {
   nickname: string;
   avatarUrl: string | null;
   subscriptionTier: SubscriptionTier;
+  /** Period end; set by webhook or test. */
+  subscriptionExpiresAt: string | null;
+  /** Stripe/RevenueCat id; null for test. */
+  subscriptionExternalId: string | null;
+  /** e.g. 'stripe' | 'revenuecat' | 'test'. */
+  subscriptionProvider: string | null;
   createdAt: string;
   updatedAt: string;
 }

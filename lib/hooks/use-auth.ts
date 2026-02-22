@@ -36,6 +36,9 @@ const fetchProfile = async (userId: string): Promise<Profile | null> => {
     nickname: profileData.nickname,
     avatarUrl: profileData.avatar_url,
     subscriptionTier: profileData.subscription_tier ?? 'free',
+    subscriptionExpiresAt: profileData.subscription_expires_at ?? null,
+    subscriptionExternalId: profileData.subscription_external_id ?? null,
+    subscriptionProvider: profileData.subscription_provider ?? null,
     createdAt: '',
     updatedAt: '',
   };
@@ -120,7 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     const updatedProfile = await fetchProfile(user.id);
     if (updatedProfile) {
-      console.log('[useAuth] Profile refreshed, new avatar_url:', updatedProfile.avatar_url);
+      console.log('[useAuth] Profile refreshed, avatarUrl:', updatedProfile.avatarUrl);
       set({ profile: updatedProfile });
     } else {
       console.warn('[useAuth] Profile refresh returned null');
