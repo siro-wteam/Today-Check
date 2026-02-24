@@ -6,7 +6,7 @@ import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isToday, isTomorrow, parse } from 'date-fns';
-import { Users, X } from 'lucide-react-native';
+import { MapPin, Users, X } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
     KeyboardAvoidingView,
@@ -19,6 +19,7 @@ import {
     View,
 } from 'react-native';
 import { showToast } from '@/utils/toast';
+import { LocationInput } from './LocationInput';
 import { ModalCloseButton } from './ModalCloseButton';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,6 +47,8 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
   // Group task fields
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null); // null = personal task
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+  const [location, setLocation] = useState<string | null>(null);
+  const [showLocationField, setShowLocationField] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -136,6 +139,8 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
     setDueTimeEnd(null);
     setSelectedGroupId(null);
     setSelectedAssigneeIds([]);
+    setLocation(null);
+    setShowLocationField(false);
   };
 
   const handleClose = () => {
@@ -202,12 +207,14 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
           due_date: dueDateStr,
           due_time: dueTimeStr,
           due_time_end: dueTimeEndStr,
+          location: location?.trim() || null,
         }
       : {
           title: cleanedTitle,
           due_date: dueDateStr,
           due_time: dueTimeStr,
           due_time_end: dueTimeEndStr,
+          location: location?.trim() || null,
         };
 
     setIsSubmitting(true);
@@ -391,15 +398,44 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
                 </View>
               </ScrollView>
 
-              {/* Title Input */}
-              <TextInput
-                className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-4 text-base text-gray-900 dark:text-white mb-4"
-                placeholder="What do you want to do?"
-                placeholderTextColor="#9ca3af"
-                value={title}
-                onChangeText={setTitle}
-                editable={true}
-              />
+              {/* Title row: input + location icon (icon only when no location; tap to open field) */}
+              <View className="flex-row items-center gap-2 mb-4">
+                <TextInput
+                  className="flex-1 bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-4 text-base text-gray-900 dark:text-white min-w-0"
+                  placeholder="What do you want to do?"
+                  placeholderTextColor="#9ca3af"
+                  value={title}
+                  onChangeText={setTitle}
+                  editable={true}
+                />
+                {location == null && (
+                  <Pressable
+                    onPress={() => {
+                      if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      setShowLocationField(true);
+                    }}
+                    className="rounded-xl bg-gray-50 dark:bg-gray-800 p-3 border border-gray-200 dark:border-gray-600"
+                  >
+                    <MapPin size={22} color={colors.textSub} strokeWidth={2} />
+                  </Pressable>
+                )}
+              </View>
+
+              {/* Location field: only when icon was tapped (no location) or when location is set (chip) */}
+              {(showLocationField && location == null) || location != null ? (
+                <View className="mb-4">
+                  <LocationInput
+                    value={location}
+                    onChange={(v) => {
+                      setLocation(v);
+                      if (v == null) setShowLocationField(false);
+                    }}
+                    hideTriggerWhenEmpty={true}
+                    expandedWhenEmpty={showLocationField && location == null}
+                    onCollapse={() => setShowLocationField(false)}
+                  />
+                </View>
+              ) : null}
 
               {/* Assignee Bar (only for group tasks) */}
               {selectedGroupId && currentGroup && (

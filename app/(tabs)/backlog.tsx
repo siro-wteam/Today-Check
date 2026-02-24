@@ -14,10 +14,11 @@ import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
 import type { Task } from '@/lib/types';
 import { getMineLabelStyle, getGroupLabelStyle } from '@/lib/utils/task-label-colors';
 import { formatTimeRange } from '@/lib/utils/format-time-range';
+import { openLocationInMaps } from '@/lib/utils/open-maps';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { CalendarCheck, Check, Clock, Package, Trash2, Undo2, Users } from 'lucide-react-native';
+import { CalendarCheck, Check, Clock, MapPin, Package, Trash2, Undo2, Users } from 'lucide-react-native';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -862,7 +863,7 @@ function BacklogItem({
             </View>
           </View>
 
-          {/* 두 번째 줄: 그룹명 + 담당자이니셜 + 백로그뱃지 */}
+          {/* 두 번째 줄: 그룹명 + 담당자이니셜 + 장소 + 백로그뱃지 */}
           <View style={{ 
             flexDirection: 'row', 
             alignItems: 'center', 
@@ -870,6 +871,26 @@ function BacklogItem({
             flexWrap: 'wrap', // Allow badges to wrap to next line
             marginLeft: 36, // Align with title (checkbox width + gap)
           }}>
+            {task.location && (
+              <Pressable
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); openLocationInMaps(task.location!); }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: colors.gray100,
+                  paddingHorizontal: 6,
+                  paddingVertical: 4,
+                  borderRadius: borderRadius.sm,
+                  flexShrink: 0,
+                  maxWidth: 140,
+                }}
+              >
+                <MapPin size={10} color="#475569" strokeWidth={2} />
+                <Text style={{ fontSize: 10, fontWeight: '500', color: '#475569', marginLeft: 4 }} numberOfLines={1} ellipsizeMode="tail">
+                  {task.location}
+                </Text>
+              </Pressable>
+            )}
             {/* Mine / Group label (tap to filter) */}
             {(() => {
               const isMine = !task.group_id;

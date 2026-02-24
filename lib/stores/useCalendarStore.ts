@@ -359,6 +359,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       batch_id: `batch-${Date.now()}`, // Temporary batch ID
       group_id: 'group_id' in input && input.group_id ? input.group_id : null,
       original_due_date: input.due_date || null,
+      location: input.location ?? null,
       assignees: [], // Will be populated by server response
     };
     

@@ -17,6 +17,7 @@ import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
 import { getMineLabelStyle, getGroupLabelStyle } from '@/lib/utils/task-label-colors';
 import type { TaskStatus, TaskWithRollover } from '@/lib/types';
 import { formatTimeRange } from '@/lib/utils/format-time-range';
+import { openLocationInMaps } from '@/lib/utils/open-maps';
 import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
 import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
@@ -24,7 +25,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, MapPin, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
@@ -1421,7 +1422,7 @@ function TaskItem({
             )}
           </View>
 
-          {/* 두 번째 줄: 그룹명 + 담당자이니셜 + 백로그뱃지 */}
+            {/* 두 번째 줄: 그룹명 + 담당자이니셜 + 장소 + 백로그뱃지 */}
           <View style={{ 
             flexDirection: 'row', 
             alignItems: 'center', 
@@ -1429,6 +1430,27 @@ function TaskItem({
             flexWrap: 'wrap', // Allow badges to wrap to next line
             marginLeft: 36, // Align with title (checkbox width + gap)
           }}>
+            {/* Location badge - tap to open in Google Maps */}
+            {task.location && (
+              <Pressable
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); openLocationInMaps(task.location!); }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: colors.gray100,
+                  paddingHorizontal: 6,
+                  paddingVertical: 4,
+                  borderRadius: borderRadius.sm,
+                  flexShrink: 0,
+                  maxWidth: 140,
+                }}
+              >
+                <MapPin size={10} color="#475569" strokeWidth={2} />
+                <Text style={{ fontSize: 10, fontWeight: '500', color: '#475569', marginLeft: 4 }} numberOfLines={1} ellipsizeMode="tail">
+                  {task.location}
+                </Text>
+              </Pressable>
+            )}
             {/* Mine / Group label (tap to filter) */}
             {(() => {
               const isMine = !task.group_id;
@@ -1535,6 +1557,7 @@ export const MemoizedTaskItem = React.memo(TaskItem, (prevProps, nextProps) => {
     prevProps.task.due_time_end === nextProps.task.due_time_end &&
     prevProps.task.completed_at === nextProps.task.completed_at &&
     prevProps.task.group_id === nextProps.task.group_id &&
+    prevProps.task.location === nextProps.task.location &&
     JSON.stringify(prevProps.task.assignees) === JSON.stringify(nextProps.task.assignees) &&
     prevProps.isFuture === nextProps.isFuture &&
     prevProps.isOverdue === nextProps.isOverdue &&

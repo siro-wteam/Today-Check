@@ -5,15 +5,17 @@ import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
 import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import type { Task } from '@/lib/types';
+import { openLocationInMaps } from '@/lib/utils/open-maps';
 import { showToast } from '@/utils/toast';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, format, isToday, isTomorrow, parseISO } from 'date-fns';
 import * as Haptics from 'expo-haptics';
-import { Package, Trash2, Users, X } from 'lucide-react-native';
+import { MapPin, Package, Trash2, Users, X } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LocationInput } from './LocationInput';
 import { ModalCloseButton } from './ModalCloseButton';
 
 interface EditTaskBottomSheetProps {
@@ -48,6 +50,8 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>(
     task.assignees?.map(a => a.user_id) || []
   );
+  const [location, setLocation] = useState<string | null>(task.location ?? null);
+  const [showLocationField, setShowLocationField] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const prevVisibleRef = useRef(false);
   const dateInputRef = useRef<any>(null);
@@ -79,13 +83,15 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       setDueTimeEnd(task.due_time_end ? parseISO(`2000-01-01T${task.due_time_end}`) : null);
       setSelectedGroupId(task.group_id || null);
       setSelectedAssigneeIds(task.assignees?.map(a => a.user_id) || []);
+      setLocation(task.location ?? null);
+      setShowLocationField(false);
       setShowDatePicker(false);
       setShowTimePicker(false);
       setShowEndTimePicker(false);
       setIsSaving(false); // Reset saving state when modal opens
     }
     prevVisibleRef.current = visible;
-  }, [visible, task.title, task.due_date, task.due_time, task.due_time_end, task.group_id, task.assignees]);
+  }, [visible, task.title, task.due_date, task.due_time, task.due_time_end, task.group_id, task.assignees, task.location]);
 
   // 웹에서 날짜 선택기 자동 열기
   useEffect(() => {
@@ -351,6 +357,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       due_time: dueTimeStr,
       due_time_end: dueTimeEndStr,
       group_id: selectedGroupId,
+      location: location?.trim() || null,
       updated_at: new Date().toISOString(),
     };
 
@@ -361,6 +368,7 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
       due_time: dueTimeStr,
       due_time_end: dueTimeEndStr,
       group_id: selectedGroupId,
+      location: location?.trim() || null,
     };
     if (wasBacklog && dueDateStr) {
       updatePayload.original_due_date = dueDateStr;
@@ -677,15 +685,56 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
                 </View>
               </ScrollView>
 
-              {/* Title Input */}
-              <TextInput
-                className="bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-4 text-base text-gray-900 dark:text-white mb-4"
-                placeholder="What do you want to do?"
-                placeholderTextColor="#9ca3af"
-                value={title}
-                onChangeText={setTitle}
-                editable={effectiveCanEdit}
-              />
+              {/* Title row: input + location icon (icon only when no location and editable; tap to open field) */}
+              <View className="flex-row items-center gap-2 mb-4">
+                <TextInput
+                  className="flex-1 bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-4 text-base text-gray-900 dark:text-white min-w-0"
+                  placeholder="What do you want to do?"
+                  placeholderTextColor="#9ca3af"
+                  value={title}
+                  onChangeText={setTitle}
+                  editable={effectiveCanEdit}
+                />
+                {effectiveCanEdit && location == null && (
+                  <Pressable
+                    onPress={() => {
+                      if (Platform.OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      setShowLocationField(true);
+                    }}
+                    className="rounded-xl bg-gray-50 dark:bg-gray-800 p-3 border border-gray-200 dark:border-gray-600"
+                  >
+                    <MapPin size={22} color="#64748b" strokeWidth={2} />
+                  </Pressable>
+                )}
+              </View>
+
+              {/* Location: editable = icon-triggered field or chip; read-only = tap to open maps */}
+              {effectiveCanEdit ? (
+                ((showLocationField && location == null) || location != null) ? (
+                  <View className="mb-4">
+                    <LocationInput
+                      value={location}
+                      onChange={(v) => {
+                        setLocation(v);
+                        if (v == null) setShowLocationField(false);
+                      }}
+                      hideTriggerWhenEmpty={true}
+                      expandedWhenEmpty={showLocationField && location == null}
+                      onCollapse={() => setShowLocationField(false)}
+                    />
+                  </View>
+                ) : null
+              ) : task.location ? (
+                <Pressable
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); openLocationInMaps(task.location!); }}
+                  className="flex-row items-center gap-2 mb-4 rounded-lg bg-gray-50 dark:bg-gray-800 px-4 py-2"
+                >
+                  <MapPin size={16} color="#64748b" />
+                  <Text className="text-gray-600 dark:text-gray-400 flex-1" numberOfLines={1}>
+                    {task.location}
+                  </Text>
+                </Pressable>
+              ) : null}
 
               {/* Assignee Bar (only for group tasks) */}
               {selectedGroupId && currentGroup && (

@@ -66,6 +66,7 @@ export interface Task {
   deleted_at: string | null;
   group_id: string | null;
   creator_id: string;
+  location: string | null;
   task_assignees?: any;
 }
 
@@ -103,6 +104,7 @@ export interface CreateTaskInput {
   due_time_end?: string;
   group_id?: string;
   assignee_ids?: string[];
+  location?: string | null;
 }
 
 export interface CreateTaskWithAssigneesInput {
@@ -113,6 +115,7 @@ export interface CreateTaskWithAssigneesInput {
   due_time_end?: string;
   group_id?: string;
   assignees?: { user_id: string; is_completed?: boolean }[];
+  location?: string | null;
 }
 
 export interface UpdateTaskInput {
@@ -124,6 +127,7 @@ export interface UpdateTaskInput {
   due_time?: string;
   due_time_end?: string;
   completed_at?: string | null;
+  location?: string | null;
 }
 
 /**
@@ -596,6 +600,7 @@ export async function createTask(input: CreateTaskInput) {
     due_time: input.due_time || null,
     due_time_end: input.due_time_end || null,
     original_due_date: input.due_date || null,
+    location: input.location ?? null,
   };
 
   const { data: task, error: taskError } = await supabase
@@ -682,6 +687,7 @@ export async function createTaskWithAssignees(input: CreateTaskWithAssigneesInpu
     due_time: input.due_time || null,
     due_time_end: input.due_time_end || null,
     original_due_date: input.due_date || null,
+    location: input.location ?? null,
   };
 
   const { data: task, error: taskError } = await supabase

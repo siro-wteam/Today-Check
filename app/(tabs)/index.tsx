@@ -15,6 +15,7 @@ import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
 import { getMineLabelStyle, getGroupLabelStyle } from '@/lib/utils/task-label-colors';
 import type { TaskStatus } from '@/lib/types';
 import { formatTimeRange } from '@/lib/utils/format-time-range';
+import { openLocationInMaps } from '@/lib/utils/open-maps';
 import { getTasksForDate, groupTasksByDate, type TaskWithOverdue } from '@/lib/utils/task-filtering';
 import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
@@ -23,7 +24,7 @@ import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, forma
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { calculateRolloverInfo, duplicateTasksToNextWeek, moveTaskToBacklog, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, MapPin, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -1510,7 +1511,17 @@ const DailyCard = React.memo(function DailyCard({
                           </Text>
                         </View>
                       )}
-                      
+                      {task.location && (
+                        <Pressable
+                          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); openLocationInMaps(task.location!); }}
+                          style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.gray100, paddingHorizontal: 6, paddingVertical: 2, borderRadius: borderRadius.sm, flexShrink: 0, maxWidth: 140 }}
+                        >
+                          <MapPin size={10} color={colors.textSub} strokeWidth={2} />
+                          <Text style={{ fontSize: 10, fontWeight: '500', color: colors.textSub, marginLeft: 2 }} numberOfLines={1} ellipsizeMode="tail">
+                            {task.location}
+                          </Text>
+                        </Pressable>
+                      )}
                       {!task.due_date && (
                         <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.gray100, paddingHorizontal: 6, paddingVertical: 2, borderRadius: borderRadius.sm, flexShrink: 0 }}>
                           <Package size={10} color={colors.textSub} strokeWidth={2} />

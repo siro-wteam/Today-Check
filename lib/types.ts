@@ -36,6 +36,7 @@ export interface Task {
   created_at: string; // ISO timestamp
   updated_at: string; // ISO timestamp
   deleted_at: string | null; // Soft delete timestamp. NULL = active
+  location: string | null; // Optional place/location (e.g. from Google Places)
   // Joined data
   assignees?: TaskAssignee[]; // List of assignees with completion status
 }
@@ -50,6 +51,7 @@ export interface CreateTaskInput {
   original_due_date?: string | null;
   group_id?: string | null; // For group tasks
   assignee_id?: string; // For personal tasks, defaults to current user
+  location?: string | null; // Optional place/location
 }
 
 // Type for creating group tasks with multiple assignees (1 task -> N assignees)
@@ -60,6 +62,7 @@ export interface CreateTaskWithAssigneesInput {
   due_date?: string | null;
   due_time?: string | null;
   due_time_end?: string | null;
+  location?: string | null; // Optional place/location
 }
 
 // Type for updating a task (all fields optional except id)
@@ -72,6 +75,7 @@ export interface UpdateTaskInput {
   due_time_end?: string | null;
   completed_at?: string | null;
   group_id?: string | null; // Allow changing group (null = personal task)
+  location?: string | null; // Optional place/location
   // Set when scheduling from backlog; clear (null) when moving to backlog; omit when only rescheduling date
   original_due_date?: string | null;
 }
