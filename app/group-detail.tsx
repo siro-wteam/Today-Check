@@ -14,6 +14,7 @@ import {
   TextInput,
   BackHandler,
   Dimensions,
+  InteractionManager,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Copy, Crown, Users, Trash2, LogOut, Share2, Shield, MoreVertical, Edit2, Camera, Image as ImageIcon } from 'lucide-react-native';
@@ -30,6 +31,8 @@ import { uploadGroupImage, getBlockedMembers, unblockMember, type BlockedMember 
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const DRAG_THRESHOLD = 100; // Minimum drag distance to dismiss
+const DISMISS_SPRING_CONFIG = { damping: 22, stiffness: 320 };
+const DISMISS_DELAY_MS = 220; // Close shortly after animation starts (don't rely on spring callback - it can fire very late)
 
 export default function GroupDetailScreen() {
   const router = useRouter();
@@ -79,28 +82,28 @@ export default function GroupDetailScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      // Fallback: navigate to home
       router.replace('/(tabs)/group');
     }
   }, [router]);
-  
+
+  // Schedule dismiss after a short delay (spring callback is unreliable - can fire 3–5s later)
+  const scheduleDismiss = useCallback(() => {
+    setTimeout(dismissModal, DISMISS_DELAY_MS);
+  }, [dismissModal]);
+
   // Handle Android back button with zoom-out animation
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      // Trigger zoom-out animation
-      translateY.value = withSpring(SCREEN_HEIGHT);
-      scale.value = withSpring(0.9);
-      // Dismiss modal after a short delay to allow animation to start
-      setTimeout(() => {
-        dismissModal();
-      }, 100);
+      translateY.value = withSpring(SCREEN_HEIGHT, DISMISS_SPRING_CONFIG);
+      scale.value = withSpring(0.9, DISMISS_SPRING_CONFIG);
+      scheduleDismiss();
       return true;
     });
 
     return () => backHandler.remove();
-  }, [dismissModal, translateY, scale]);
+  }, [scheduleDismiss, translateY, scale]);
   
   // Pan gesture handler for drag to dismiss (Native only - Web has pointer capture issues)
   const panGesture = useMemo(
@@ -124,12 +127,10 @@ export default function GroupDetailScreen() {
         })
         .onEnd((event) => {
           if (event.translationY > DRAG_THRESHOLD && isAtTop.value) {
-            // Dismiss: zoom out and close modal
-            translateY.value = withSpring(SCREEN_HEIGHT);
-            scale.value = withSpring(0.9);
-            runOnJS(dismissModal)();
+            translateY.value = withSpring(SCREEN_HEIGHT, DISMISS_SPRING_CONFIG);
+            scale.value = withSpring(0.9, DISMISS_SPRING_CONFIG);
+            runOnJS(scheduleDismiss)();
           } else {
-            // Spring back to original position
             translateY.value = withSpring(0);
             scale.value = withSpring(1);
           }
@@ -137,7 +138,7 @@ export default function GroupDetailScreen() {
         .activeOffsetY(10)
         .failOffsetX([-50, 50]);
     },
-    [dismissModal, isAtTop, startY, translateY, scale]
+    [scheduleDismiss, isAtTop, startY, translateY, scale]
   );
 
   // Animated style for drag to dismiss
@@ -156,24 +157,27 @@ export default function GroupDetailScreen() {
     isAtTop.value = offsetY <= 0;
   }, [isAtTop]);
 
-  // Fetch group on mount or when groupId changes
+  // Fetch group on mount or when groupId changes (do not depend on `groups` to avoid redundant work when list refetches)
+  const groupIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!params.groupId) return;
+    const id = params.groupId;
+    groupIdRef.current = id;
 
-    // Check if we already have this group in the groups list (from fetchMyGroups)
-    // This ensures we use the latest data from the groups list if available
-    const existingGroup = groups.find((g) => g.id === params.groupId);
-    
+    const state = useGroupStore.getState();
+    const existingGroup = state.groups.find((g) => g.id === id);
+
     if (existingGroup) {
-      // Use the group from the list (which is already up-to-date from fetchMyGroups)
-      // This syncs currentGroup with the latest data from groups array
       setCurrentGroup(existingGroup);
-    } else if (params.groupId !== group?.id) {
-      // Only fetch if we don't have it in the list
-      fetchGroupById(params.groupId, user?.id);
+    } else if (state.currentGroup?.id !== id) {
+      fetchGroupById(id, user?.id);
     }
+
+    return () => {
+      groupIdRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.groupId, user?.id, groups]);
+  }, [params.groupId, user?.id]);
 
   // Update editingGroupName when group name changes
   useEffect(() => {
@@ -190,15 +194,16 @@ export default function GroupDetailScreen() {
     useGroupStore.setState({
       onKickedFromGroup: (groupId: string) => {
         if (groupId === params.groupId) {
-          // User was kicked from the current group, navigate back
           router.back();
         }
       },
     });
 
     return () => {
-      // Cleanup callback on unmount
-      useGroupStore.setState({ onKickedFromGroup: null });
+      // Defer store cleanup until after close animation so back doesn't feel heavy
+      InteractionManager.runAfterInteractions(() => {
+        useGroupStore.setState({ onKickedFromGroup: null });
+      });
     };
   }, [params.groupId, user?.id, router]);
 

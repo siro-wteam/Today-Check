@@ -6,9 +6,12 @@ import { NotificationSettingsModal } from '@/components/NotificationSettingsModa
 import { borderRadius, colors, spacing } from '@/constants/colors';
 import { getProfileStats, type ProfileStats } from '@/lib/api/profile-stats';
 import { subscriptionTestActivate, subscriptionTestDeactivate } from '@/lib/api/profiles';
+import { ONBOARDING_STORAGE_KEY } from '@/lib/constants/onboarding';
 import { signOut, useAuth } from '@/lib/hooks/use-auth';
 import { useSubscription } from '@/lib/hooks/use-subscription';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Crown, Edit2, LogOut, Mail, User as UserIcon } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
@@ -16,6 +19,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, SafeAreaView, ScrollView
 import { showToast } from '@/utils/toast';
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const { user, profile, updateProfile, refreshProfile } = useAuth();
   const { tier, isSubscribed } = useSubscription();
   const queryClient = useQueryClient();
@@ -85,6 +89,12 @@ export default function ProfileScreen() {
 
   const handleAboutPress = () => {
     setIsAboutModalVisible(true);
+  };
+
+  /** 개발 시 온보딩 다시 보기 (재설치 없이 테스트) */
+  const handleShowOnboardingAgain = async () => {
+    await AsyncStorage.removeItem(ONBOARDING_STORAGE_KEY);
+    router.replace('/onboarding');
   };
 
   const handleSignOut = async () => {
@@ -450,6 +460,18 @@ export default function ProfileScreen() {
         }}>
           TodayCheck v1.0.0
         </Text>
+
+        {/* 개발 시에만: 온보딩 다시 보기 (재설치 없이 테스트) */}
+        {__DEV__ && (
+          <Pressable
+            onPress={handleShowOnboardingAgain}
+            style={{ marginTop: spacing.lg, paddingVertical: spacing.sm }}
+          >
+            <Text style={{ textAlign: 'center', fontSize: 12, color: colors.primary }}>
+              온보딩 다시 보기 (테스트)
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
 
       {/* Edit Nickname Modal */}

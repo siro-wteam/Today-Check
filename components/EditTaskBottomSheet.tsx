@@ -66,13 +66,12 @@ export function EditTaskBottomSheet({ visible, onClose, task, onUpdate, onDateCh
     onDateChangeRef.current = onDateChange;
   }, [onDateChange]);
 
-  // Fetch groups when modal opens
+  // Fetch groups only when modal opens and we don't have groups yet (avoids duplicate API calls)
   useEffect(() => {
-    if (visible && user?.id) {
-      fetchMyGroups(user.id);
-    }
+    if (!visible || !user?.id) return;
+    if (groups.length === 0) fetchMyGroups(user.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, user?.id]); // fetchMyGroups is stable from Zustand store, no need to include in deps
+  }, [visible, user?.id, groups.length]);
 
   // Reset form when modal opens (only when visible changes from false to true)
   useEffect(() => {

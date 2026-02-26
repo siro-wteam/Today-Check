@@ -20,6 +20,8 @@ import { colors } from '@/constants/colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { NotificationSettingsProvider } from '@/lib/contexts/NotificationSettingsContext';
 import { useAuth } from '@/lib/hooks/use-auth';
+import { justCompletedOnboarding, setJustCompletedOnboarding } from '@/lib/constants/onboarding';
+import { useOnboardingComplete } from '@/lib/hooks/use-onboarding';
 import { queryClient } from '@/lib/query-client';
 import { setQueryClientForGroupStore, useGroupStore } from '@/lib/stores/useGroupStore';
 import '../global.css';
@@ -45,6 +47,7 @@ export const unstable_settings = {
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const { isAuthenticated, loading, user } = useAuth();
+  const { hasSeenOnboarding, reloadFromStorage } = useOnboardingComplete();
   const segments = useSegments();
   const router = useRouter();
   const { fetchMyGroups } = useGroupStore();
@@ -56,27 +59,43 @@ function RootLayoutNav() {
     }
   }, [isAuthenticated, user?.id, fetchMyGroups]);
 
-  // Handle authentication-based navigation
+  // After leaving onboarding, re-read storage and clear "just completed" flag
   useEffect(() => {
-    if (loading) return;
+    const inOnboarding = segments[0] === 'onboarding';
+    if (!inOnboarding) {
+      reloadFromStorage().then(() => setJustCompletedOnboarding(false));
+    }
+  }, [segments[0], reloadFromStorage]);
+
+  // First-run onboarding: show onboarding until user taps "시작하기"
+  useEffect(() => {
+    if (hasSeenOnboarding === null) return;
+    if (hasSeenOnboarding) return;
+    if (justCompletedOnboarding) return; // avoid redirecting back right after "시작하기"
+    const inOnboarding = segments[0] === 'onboarding';
+    if (!inOnboarding) {
+      router.replace('/onboarding');
+    }
+  }, [hasSeenOnboarding, segments, router]);
+
+  // Handle authentication-based navigation (only after onboarding is complete)
+  useEffect(() => {
+    if (loading || hasSeenOnboarding !== true) return;
 
     const inAuthGroup = segments[0] === 'auth';
-    
-    console.log('Auth State:', { isAuthenticated, loading, segments, inAuthGroup });
+    const inOnboarding = segments[0] === 'onboarding';
+
+    if (inOnboarding) return;
 
     if (!isAuthenticated && !inAuthGroup) {
-      // Redirect to auth if not authenticated
-      console.log('Redirecting to /auth');
       router.replace('/auth');
     } else if (isAuthenticated && inAuthGroup) {
-      // Redirect to home if authenticated
-      console.log('Redirecting to /(tabs)');
       router.replace('/(tabs)');
     }
-  }, [isAuthenticated, loading, segments, router]);
+  }, [isAuthenticated, loading, hasSeenOnboarding, segments, router]);
 
-  // Show loading indicator while checking authentication
-  if (loading) {
+  // Show loading while auth or onboarding state is being read
+  if (loading || hasSeenOnboarding === null) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3b82f6" />
@@ -87,6 +106,10 @@ function RootLayoutNav() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
+        <Stack.Screen
+          name="onboarding"
+          options={{ headerShown: false }}
+        />
         <Stack.Screen 
           name="auth" 
           options={{ headerShown: false }} 
@@ -105,8 +128,9 @@ function RootLayoutNav() {
         <Stack.Screen 
           name="group-detail" 
           options={{ 
-            presentation: 'modal',
-            headerShown: false, // Hide header for popup-like appearance
+            presentation: 'transparentModal',
+            headerShown: false,
+            contentStyle: { backgroundColor: 'transparent' }, // No black backdrop when dragging to dismiss
           }} 
         />
         <Stack.Screen 

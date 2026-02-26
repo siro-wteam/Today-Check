@@ -16,6 +16,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "build": "npx expo export -p web",
+    "splash:export": "node scripts/export-splash-png.js",
     "postinstall": "node scripts/patch-expo-ios-device.js"
   },
   "dependencies": {
@@ -63,6 +64,7 @@
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "sharp": "^0.34.5",
     "typescript": "~5.9.2"
   },
   "private": true

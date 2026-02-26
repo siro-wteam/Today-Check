@@ -1,4 +1,5 @@
 import { CreateGroupModal } from '@/components/CreateGroupModal';
+import { GroupListSkeleton } from '@/components/GroupListSkeleton';
 import { JoinGroupModal } from '@/components/JoinGroupModal';
 import { borderRadius, colors, shadows } from '@/constants/colors';
 import { useAuth } from '@/lib/hooks/use-auth';
@@ -10,7 +11,7 @@ import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { Crown, Plus, UserPlus, Users } from 'lucide-react-native';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import {
     ActivityIndicator,
     Platform,
@@ -24,32 +25,121 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// Memoized card so list stays light when store updates
+const GroupCard = memo(function GroupCard({
+  group,
+  isOwner,
+  onPress,
+}: {
+  group: { id: string; name: string; imageUrl?: string | null; members: { id: string }[]; ownerId: string };
+  isOwner: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={styles.groupCard}
+      hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+      delayPressIn={0}
+      pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
+    >
+      <View style={styles.groupCardHeader}>
+        <Pressable onPress={onPress} style={styles.groupIcon} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}>
+          {group.imageUrl ? (
+            <Image source={{ uri: group.imageUrl }} style={styles.groupImage} contentFit="cover" />
+          ) : (
+            <Users size={28} color={colors.primary} strokeWidth={2} />
+          )}
+        </Pressable>
+        <Pressable onPress={onPress} style={styles.groupInfo} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}>
+          <Text style={styles.groupName}>{group.name}</Text>
+          <View style={styles.groupMeta}>
+            <Text style={styles.memberCount}>
+              {group.members.length} {group.members.length === 1 ? 'member' : 'members'}
+            </Text>
+            <View style={styles.roleBadge}>
+              {isOwner ? (
+                <>
+                  <Crown size={12} color="#F59E0B" strokeWidth={2} />
+                  <Text style={styles.roleBadgeText}>Owner</Text>
+                </>
+              ) : (
+                <Text style={styles.roleText}>Member</Text>
+              )}
+            </View>
+          </View>
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+});
+
 export default function GroupScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { groups, createGroup, joinGroup, fetchMyGroups, loading } = useGroupStore();
+  const groups = useGroupStore((s) => s.groups);
+  const loading = useGroupStore((s) => s.loading);
+  const fetchMyGroups = useGroupStore((s) => s.fetchMyGroups);
+  const createGroup = useGroupStore((s) => s.createGroup);
+  const joinGroup = useGroupStore((s) => s.joinGroup);
   const { canCreateGroup, refetchGroupCount, limitMessages } = useSubscriptionLimits();
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [isJoinModalVisible, setIsJoinModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [skeletonMinElapsed, setSkeletonMinElapsed] = useState(Platform.OS === 'web');
+  const [focusSkeletonUntil, setFocusSkeletonUntil] = useState(0); // native: show skeleton when focusing with empty list
+  const prevLoadingRef = useRef(loading);
   const insets = useSafeAreaInsets();
   const isActioningRef = useRef(false);
 
+  // On native, keep skeleton visible for a minimum time on first mount
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const id = setTimeout(() => setSkeletonMinElapsed(true), 400);
+    return () => clearTimeout(id);
+  }, []);
+
+  // Mark initial load done when loading transitions from true → false
+  useEffect(() => {
+    if (prevLoadingRef.current === true && loading === false) {
+      const id = setTimeout(() => setInitialLoadDone(true), Platform.OS === 'web' ? 0 : 80);
+      prevLoadingRef.current = loading;
+      return () => clearTimeout(id);
+    }
+    prevLoadingRef.current = loading;
+  }, [loading]);
+
   // Fetch groups when user is ready
   useEffect(() => {
-    if (user?.id) {
-      fetchMyGroups(user.id);
-    }
+    if (user?.id) fetchMyGroups(user.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // Refetch when Group tab gains focus (recover from failed or early first load)
+  const lastFetchRef = useRef<number>(0);
+  const FOCUS_REFETCH_MS = 10_000;
   useFocusEffect(
     useCallback(() => {
-      if (user?.id) {
-        fetchMyGroups(user.id);
-        refetchGroupCount();
+      if (!user?.id) return;
+      if (Platform.OS !== 'web' && groups.length === 0) {
+        setFocusSkeletonUntil(Date.now() + 400);
+        const t = setTimeout(() => setFocusSkeletonUntil(0), 400);
+        return () => {
+          clearTimeout(t);
+          setFocusSkeletonUntil(0);
+        };
       }
+    }, [user?.id, groups.length])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return;
+      const now = Date.now();
+      if (now - lastFetchRef.current < FOCUS_REFETCH_MS) return;
+      lastFetchRef.current = now;
+      fetchMyGroups(user.id);
+      refetchGroupCount();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id])
   );
@@ -181,6 +271,7 @@ export default function GroupScreen() {
         showsVerticalScrollIndicator={Platform.OS === 'web'}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled={true}
+        removeClippedSubviews={Platform.OS !== 'web'}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -190,10 +281,8 @@ export default function GroupScreen() {
           />
         }
       >
-        {loading && myGroups.length === 0 ? (
-          <View style={{ flex: 1, minHeight: 200, justifyContent: 'center', alignItems: 'center' }}>
-            <ActivityIndicator size="large" color={colors.primary} />
-          </View>
+        {myGroups.length === 0 && (loading || !initialLoadDone || !skeletonMinElapsed || (Platform.OS !== 'web' && focusSkeletonUntil > 0)) ? (
+          <GroupListSkeleton />
         ) : myGroups.length === 0 ? (
           <View style={styles.emptyContainer}>
             <View style={styles.emptyIconContainer}>
@@ -239,63 +328,14 @@ export default function GroupScreen() {
           </View>
         ) : (
           <View style={styles.groupsList}>
-            {myGroups.map((group) => {
-              const currentUser = group.members.find((m) => m.id === user?.id);
-              const isOwner = group.ownerId === user?.id;
-
-              return (
-                <Pressable
-                  key={group.id}
-                  onPress={() => handleGroupPress(group.id)}
-                  style={styles.groupCard}
-                  hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
-                  delayPressIn={0}
-                  pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
-                >
-                  <View style={styles.groupCardHeader}>
-                    <Pressable
-                      onPress={() => handleGroupPress(group.id)}
-                      style={styles.groupIcon}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
-                    >
-                      {group.imageUrl ? (
-                        <Image
-                          source={{ uri: group.imageUrl }}
-                          style={styles.groupImage}
-                          contentFit="cover"
-                        />
-                      ) : (
-                        <Users size={28} color={colors.primary} strokeWidth={2} />
-                      )}
-                    </Pressable>
-                    <Pressable
-                      onPress={() => handleGroupPress(group.id)}
-                      style={styles.groupInfo}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}
-                    >
-                      <Text style={styles.groupName}>{group.name}</Text>
-                      <View style={styles.groupMeta}>
-                        <Text style={styles.memberCount}>
-                          {group.members.length} {group.members.length === 1 ? 'member' : 'members'}
-                        </Text>
-                        <View style={styles.roleBadge}>
-                          {isOwner ? (
-                            <>
-                              <Crown size={12} color="#F59E0B" strokeWidth={2} />
-                              <Text style={styles.roleBadgeText}>Owner</Text>
-                            </>
-                          ) : (
-                            <Text style={styles.roleText}>Member</Text>
-                          )}
-                        </View>
-                      </View>
-                    </Pressable>
-                  </View>
-                </Pressable>
-              );
-            })}
+            {myGroups.map((group) => (
+              <GroupCard
+                key={group.id}
+                group={group}
+                isOwner={group.ownerId === user?.id}
+                onPress={() => handleGroupPress(group.id)}
+              />
+            ))}
           </View>
         )}
       </ScrollView>

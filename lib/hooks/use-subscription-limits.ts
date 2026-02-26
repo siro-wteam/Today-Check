@@ -1,9 +1,10 @@
 /**
  * Hook for subscription limits (free tier caps).
  * Use canCreateGroup, canAddToBacklog, checkCanAddTaskToDate before actions.
+ * Prefers group count from useGroupStore when available to avoid extra group_members API call.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getBacklogTaskCount,
@@ -16,6 +17,7 @@ import {
 } from '../api/subscription-limits';
 import { useSubscription } from './use-subscription';
 import { useAuth } from './use-auth';
+import { useGroupStore } from '../stores/useGroupStore';
 
 const QUERY_KEY_BACKLOG = ['subscription-limits', 'backlog'] as const;
 const QUERY_KEY_GROUPS = (userId: string) => ['subscription-limits', 'groups', userId] as const;
@@ -24,6 +26,7 @@ export function useSubscriptionLimits() {
   const { user } = useAuth();
   const { isSubscribed } = useSubscription();
   const queryClient = useQueryClient();
+  const groups = useGroupStore((s) => s.groups);
 
   const { data: backlogCount = 0, refetch: refetchBacklog } = useQuery({
     queryKey: QUERY_KEY_BACKLOG,
@@ -36,7 +39,13 @@ export function useSubscriptionLimits() {
     staleTime: 30_000,
   });
 
-  const { data: groupCount = 0, refetch: refetchGroupCount } = useQuery({
+  // When we already have groups from store, derive owned count (no extra API call)
+  const ownedGroupCountFromStore = useMemo(
+    () => (user?.id ? groups.filter((g) => g.ownerId === user.id).length : 0),
+    [groups, user?.id]
+  );
+
+  const { data: queryGroupCount = 0, refetch: refetchGroupCount } = useQuery({
     queryKey: QUERY_KEY_GROUPS(user?.id ?? ''),
     queryFn: async () => {
       if (!user?.id) return 0;
@@ -44,9 +53,11 @@ export function useSubscriptionLimits() {
       if (error) throw error;
       return count;
     },
-    enabled: !!user?.id,
+    enabled: !!user?.id && groups.length === 0, // Skip API when we have groups from fetchMyGroups
     staleTime: 30_000,
   });
+
+  const groupCount = groups.length > 0 ? ownedGroupCountFromStore : queryGroupCount;
 
   const canCreateGroup = isSubscribed || groupCount < FREE_MAX_GROUPS;
   const canAddToBacklog = isSubscribed || backlogCount < FREE_MAX_BACKLOG;

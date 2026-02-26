@@ -67,13 +67,12 @@ export function AddTaskModal({ visible, onClose, initialDate }: AddTaskModalProp
   // Get current group's members
   const currentGroup = groups.find(g => g.id === selectedGroupId);
 
-  // Fetch groups and backlog count when modal opens (ensure fresh data)
+  // Fetch groups only when modal opens and we don't have groups yet (avoids duplicate API calls)
   useEffect(() => {
-    if (visible && user?.id) {
-      fetchMyGroups(user.id);
-      refetchBacklog();
-    }
-  }, [visible, user?.id, fetchMyGroups, refetchBacklog]);
+    if (!visible || !user?.id) return;
+    if (groups.length === 0) fetchMyGroups(user.id);
+    refetchBacklog();
+  }, [visible, user?.id, groups.length, fetchMyGroups, refetchBacklog]);
 
   // Set initial date when modal opens or initialDate changes
   useEffect(() => {

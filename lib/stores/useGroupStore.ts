@@ -43,6 +43,9 @@ export const setQueryClientForGroupStore = (queryClient: any) => {
   queryClientInstance = queryClient;
 };
 
+// In-flight deduplication for fetchMyGroups (same user = same promise, avoids duplicate API calls)
+const fetchMyGroupsInFlightRef: { current: { userId: string; promise: Promise<void> } | null } = { current: null };
+
 interface GroupState {
   groups: Group[];
   currentGroup: Group | null;
@@ -169,46 +172,55 @@ export const useGroupStore = create<GroupState>((set, get) => ({
   },
 
   fetchMyGroups: async (userId: string) => {
-    set({ loading: true, error: null });
+    // Deduplicate: if already fetching for this user, return the same promise (avoids duplicate API calls)
+    const inFlight = fetchMyGroupsInFlightRef.current;
+    if (inFlight?.userId === userId) {
+      return inFlight.promise;
+    }
 
-    try {
-      const { data, error } = await fetchMyGroupsAPI(userId);
+    const promise = (async () => {
+      set({ loading: true, error: null });
+      try {
+        const { data, error } = await fetchMyGroupsAPI(userId);
 
-      if (error) {
-        const errorMessage = error.message || 'Failed to fetch groups';
-        set({ loading: false, error: errorMessage });
-        return;
-      }
-
-      // Update groups array
-      const updatedGroups = data || [];
-      
-      // Sync currentGroup with updated groups data if it exists
-      set((state) => {
-        let updatedCurrentGroup = state.currentGroup;
-        if (updatedCurrentGroup) {
-          // Find the updated group data from the fetched groups
-          const updatedGroup = updatedGroups.find((g) => g.id === updatedCurrentGroup?.id);
-          if (updatedGroup) {
-            // Update currentGroup with latest data (especially members)
-            updatedCurrentGroup = updatedGroup;
-          }
+        if (error) {
+          const errorMessage = error.message || 'Failed to fetch groups';
+          set({ loading: false, error: errorMessage });
+          return;
         }
 
-        return {
-          groups: updatedGroups,
-          currentGroup: updatedCurrentGroup,
-          loading: false,
-        };
-      });
-    } catch (err: any) {
-      const errorMessage = err.message || 'Failed to fetch groups';
-      set({ loading: false, error: errorMessage });
-    }
+        const updatedGroups = data || [];
+        set((state) => {
+          let updatedCurrentGroup = state.currentGroup;
+          if (updatedCurrentGroup) {
+            const updatedGroup = updatedGroups.find((g) => g.id === updatedCurrentGroup?.id);
+            if (updatedGroup) updatedCurrentGroup = updatedGroup;
+          }
+          return {
+            groups: updatedGroups,
+            currentGroup: updatedCurrentGroup,
+            loading: false,
+          };
+        });
+      } catch (err: any) {
+        const errorMessage = err.message || 'Failed to fetch groups';
+        set({ loading: false, error: errorMessage });
+      } finally {
+        fetchMyGroupsInFlightRef.current = null;
+      }
+    })();
+
+    fetchMyGroupsInFlightRef.current = { userId, promise };
+    return promise;
   },
 
   fetchGroupById: async (groupId: string, userId?: string) => {
-    set({ loading: true, error: null });
+    // Only set global loading when we don't already have this group (avoids UI flash when refreshing)
+    const state = get();
+    const isRefresh = state.currentGroup?.id === groupId;
+    if (!isRefresh) {
+      set({ loading: true, error: null });
+    }
 
     try {
       const { data, error } = await fetchGroupByIdAPI(groupId, userId);
