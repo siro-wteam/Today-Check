@@ -121,7 +121,14 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-        <AppHeader onNotificationPress={handleNotificationPress} />
+        <AppHeader
+          onNotificationPress={handleNotificationPress}
+          centerContent={
+            <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+              Profile
+            </Text>
+          }
+        />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -132,7 +139,14 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header */}
-      <AppHeader onNotificationPress={handleNotificationPress} />
+      <AppHeader
+        onNotificationPress={handleNotificationPress}
+        centerContent={
+          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+            Profile
+          </Text>
+        }
+      />
 
       <ScrollView 
         style={{ flex: 1 }}

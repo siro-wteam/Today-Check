@@ -17,6 +17,7 @@ import { Link2 } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import {
     ActivityIndicator,
+    Dimensions,
     Platform,
     Pressable,
     RefreshControl,
@@ -30,6 +31,9 @@ import { Swipeable } from 'react-native-gesture-handler';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Group } from '@/lib/types';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const PAGE_WIDTH = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
 
 // Memoized card; only icon and group name open detail (like backlog/week view)
 const GroupCard = memo(function GroupCard({
@@ -259,54 +263,70 @@ export default function GroupScreen() {
   return (
     <SafeAreaView style={styles.container}>
       {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
-      <AppHeader />
-
-      {/* Blue summary bar: owned / member counts + Join & Create */}
-      <View style={styles.blueBar}>
-        <View style={styles.blueBarStats}>
-          <View style={styles.blueBarStat}>
-            <Text style={styles.blueBarLabel}>Groups I own</Text>
-            <Text style={styles.blueBarCount}>{ownedCount}</Text>
+      <AppHeader
+        centerContent={
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 }}>
+            <View style={{ flex: 1, alignItems: 'flex-start', minWidth: 0 }}>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+                Groups
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+                I own{' '}
+              </Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
+                {ownedCount}
+              </Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                ,{' '}
+              </Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+                I'm in{' '}
+              </Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
+                {memberCount}
+              </Text>
+            </View>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, minWidth: 0 }}>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  setIsJoinModalVisible(true);
+                }}
+                hitSlop={10}
+                style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+              >
+                <UserPlus size={18} color={colors.textSub} strokeWidth={2} />
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  if (!canCreateGroup) {
+                    showToast('error', 'Limit', limitMessages.groups);
+                    return;
+                  }
+                  setIsCreateModalVisible(true);
+                }}
+                hitSlop={10}
+                style={({ pressed }) => [{ opacity: canCreateGroup && pressed ? 0.7 : 1 }, !canCreateGroup && { opacity: 0.5 }]}
+              >
+                <Plus size={18} color={colors.textSub} strokeWidth={2} />
+              </Pressable>
+            </View>
           </View>
-          <View style={styles.blueBarDivider} />
-          <View style={styles.blueBarStat}>
-            <Text style={styles.blueBarLabel}>Groups I'm in</Text>
-            <Text style={styles.blueBarCount}>{memberCount}</Text>
-          </View>
-        </View>
-        <View style={styles.blueBarActions}>
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              setIsJoinModalVisible(true);
-            }}
-            style={({ pressed }) => [styles.blueBarButton, pressed && { opacity: 0.8 }]}
-            hitSlop={12}
-          >
-            <UserPlus size={22} color={colors.primaryForeground} strokeWidth={2} />
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              if (!canCreateGroup) {
-                showToast('error', 'Limit', limitMessages.groups);
-                return;
-              }
-              setIsCreateModalVisible(true);
-            }}
-            style={({ pressed }) => [
-              styles.blueBarButton,
-              pressed && { opacity: 0.8 },
-              !canCreateGroup && { opacity: 0.6 },
-            ]}
-            hitSlop={12}
-          >
-            <Plus size={24} color={colors.primaryForeground} strokeWidth={2} />
-          </Pressable>
-        </View>
-      </View>
+        }
+      />
 
-      {/* Group List: skeleton / empty in ScrollView; list with long-press reorder in DraggableFlatList */}
+      {/* Group List: 주간/백로그와 동일 가로 폭, 가운데 정렬 */}
+      <View
+        style={{
+          flex: 1,
+          width: PAGE_WIDTH,
+          alignSelf: 'center',
+          ...(Platform.OS === 'web' ? { maxWidth: 600 } : {}),
+        }}
+      >
       {myGroups.length === 0 && (loading || !initialLoadDone) ? (
         <ScrollView
           style={styles.scrollView}
@@ -447,6 +467,7 @@ export default function GroupScreen() {
           }
         />
       )}
+      </View>
 
       {/* Create Group Modal */}
       <CreateGroupModal
@@ -471,60 +492,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  blueBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.primary,
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 12,
-    borderRadius: borderRadius.xl,
-    ...shadows.sm,
-    ...(Platform.OS === 'web' ? { maxWidth: 600, width: '100%', alignSelf: 'center' as const } : {}),
-  },
-  blueBarStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  blueBarStat: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 6,
-  },
-  blueBarLabel: {
-    fontSize: 13,
-    color: colors.primaryForeground,
-    opacity: 0.9,
-  },
-  blueBarCount: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.primaryForeground,
-  },
-  blueBarDivider: {
-    width: 1,
-    height: 16,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-    marginHorizontal: 16,
-  },
-  blueBarActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  blueBarButton: {
-    width: 44,
-    height: 44,
-    borderRadius: borderRadius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   scrollView: {
     flex: 1,

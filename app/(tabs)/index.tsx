@@ -24,7 +24,7 @@ import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, forma
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { calculateRolloverInfo, duplicateTasksToNextWeek, moveTaskToBacklog, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, MapPin, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, MapPin, Package, Plus, Target, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -575,7 +575,7 @@ export default function WeekScreen() {
     handleTaskEdit(task);
   }, [handleTaskEdit]);
   
-  // 날짜 옆 괄호: 이번 주 [완료/전체], 과거 [N completed], 미래 [N scheduled]
+  // 날짜 옆: 이번 주 Today's progress 7/15, 과거 N completed, 미래 N scheduled (숫자만 블루)
   const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
   const thisWeekPage = weekPages.find(p => p.weekStartStr === THIS_WEEK_START_STR);
   const todayGroupFromThisWeek = thisWeekPage?.dailyGroups.find(g => g.date === todayStr);
@@ -586,81 +586,77 @@ export default function WeekScreen() {
   const weekTasks = currentWeekPage?.dailyGroups?.flatMap(g => g.tasks) || [];
   const weekCompleted = weekTasks.filter(t => t.status === 'DONE').length;
 
-  let bracketText = '';
-  if (isCurrentWeek) {
-    bracketText = `[Today's progress ${todayCompleted}/${todayTotal}]`;
-  } else if (isPastWeek) {
-    bracketText = `[${weekCompleted} completed]`;
-  } else {
-    bracketText = `[${weekTasks.length} scheduled]`;
-  }
-
-  const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
-  
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader onNotificationPress={() => setIsNotificationModalVisible(true)} />
+      <AppHeader
+        onNotificationPress={() => setIsNotificationModalVisible(true)}
+        centerContent={
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', flex: 1, minWidth: 0 }}>
+            <View style={{ flex: 1, alignItems: 'flex-start', minWidth: 0 }}>
+              <Pressable
+                onLongPress={() => {
+                  if ((isCurrentWeek || isFutureWeek) && !copyInProgress && !isLoading) handleCopyWeekToNext();
+                }}
+                delayLongPress={400}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }} numberOfLines={1}>
+                  {currentWeekDisplay}
+                </Text>
+              </Pressable>
+            </View>
+            <View style={{ justifyContent: 'center', alignItems: 'center', minWidth: 0 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+                {isCurrentWeek ? (
+                  <>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                      Today's progress{' '}
+                    </Text>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
+                      {todayCompleted}/{todayTotal}
+                    </Text>
+                  </>
+                ) : isPastWeek ? (
+                  <>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
+                      {weekCompleted}
+                    </Text>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                      {' '}completed
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
+                      {weekTasks.length}
+                    </Text>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                      {' '}scheduled
+                    </Text>
+                  </>
+                )}
+              </View>
+            </View>
+            <View style={{ flex: 1, alignItems: 'flex-end', minWidth: 0 }}>
+              {!isCurrentWeek ? (
+                <Pressable
+                  onPress={goToThisWeek}
+                  disabled={isLoading}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+                >
+                  <Target size={18} color={colors.textSub} strokeWidth={2} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        }
+      />
       
       {/* Notification Center Modal */}
       <NotificationCenterModal
         visible={isNotificationModalVisible}
         onClose={() => setIsNotificationModalVisible(false)}
       />
-      
-      {/* 상단 한 줄: 날짜 [Today's progress 3/15] | Today 버튼 (높이 항상 동일) */}
-      <View style={[ { width: pageWidth, alignSelf: 'center' as const }, Platform.OS === 'web' && { maxWidth: 600 } ]}>
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          marginHorizontal: 16,
-          marginTop: 8,
-          marginBottom: 10,
-          gap: 10,
-          minHeight: 40,
-        }}
-      >
-        {/* 날짜 [Today's progress 3/15] 또는 [N completed] / [N scheduled] */}
-        <Pressable
-          style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'baseline', gap: 4 }}
-          onLongPress={() => {
-            if ((isCurrentWeek || isFutureWeek) && !copyInProgress && !isLoading) handleCopyWeekToNext();
-          }}
-          delayLongPress={400}
-        >
-          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }} numberOfLines={1}>
-            {currentWeekDisplay}
-          </Text>
-          <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
-            {bracketText}
-          </Text>
-        </Pressable>
-        {/* 오른쪽: Today 이동 버튼 또는 동일 높이 빈 공간 */}
-        <View style={{ width: 64, minHeight: 32, alignItems: 'flex-end', justifyContent: 'center' }}>
-          {!isCurrentWeek ? (
-            <Pressable
-              onPress={goToThisWeek}
-              disabled={isLoading}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              style={{
-                backgroundColor: colors.primary,
-                paddingHorizontal: 12,
-                height: 32,
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderRadius: borderRadius.md,
-              }}
-            >
-              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primaryForeground }}>
-                Today
-              </Text>
-            </Pressable>
-          ) : (
-            <View style={{ width: 64, height: 32 }} />
-          )}
-        </View>
-      </View>
-      </View>
       
       {/* Horizontal Week Paging View (or skeleton while loading) */}
       <View 

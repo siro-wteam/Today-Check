@@ -25,7 +25,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, MapPin, Package, Plus, Trash2, Undo2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, MapPin, Package, Plus, Target, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View, ViewToken } from 'react-native';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
@@ -610,16 +610,17 @@ export default function HomeScreen() {
                   {!isTodayPage && (
                     <Pressable
                       onPress={goToToday}
-                      style={{
-                        backgroundColor: colors.primary,
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: borderRadius.md,
-                      }}
+                      style={({ pressed }) => [
+                        {
+                          backgroundColor: colors.primary,
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                          borderRadius: borderRadius.md,
+                        },
+                        pressed && { opacity: 0.8 },
+                      ]}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: colors.primaryForeground }}>
-                        Today
-                      </Text>
+                      <Target size={18} color={colors.primaryForeground} strokeWidth={2} />
                     </Pressable>
                   )}
                   <Text

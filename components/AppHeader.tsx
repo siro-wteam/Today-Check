@@ -6,14 +6,16 @@ import { useNotificationRealtime } from '@/lib/hooks/use-notification-realtime';
 import { useQuery } from '@tanstack/react-query';
 import { Bell } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, ReactNode, Text, View } from 'react-native';
 import { NotificationCenterModal } from './NotificationCenterModal';
 
 interface AppHeaderProps {
   onNotificationPress?: () => void;
+  /** Optional center content (e.g. week view: date + progress + Today, backlog: Backlog [Total N]) */
+  centerContent?: ReactNode;
 }
 
-export function AppHeader({ onNotificationPress }: AppHeaderProps) {
+export function AppHeader({ onNotificationPress, centerContent }: AppHeaderProps) {
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   const { user } = useAuth();
   
@@ -63,25 +65,25 @@ export function AppHeader({ onNotificationPress }: AppHeaderProps) {
           Platform.OS === 'web' ? { maxWidth: 600, width: '100%', alignSelf: 'center' } : {},
         ]}
       >
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0, marginRight: 8 }}>
             <View
               style={{
-                width: 36,
-                height: 36,
+                width: 28,
+                height: 28,
                 borderRadius: borderRadius.sm,
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <LogoIcon size={36} color={colors.primary} />
+              <LogoIcon size={28} color={colors.primary} />
             </View>
-            <Text style={{ fontSize: 20, fontWeight: '700' }}>
-              <Text style={{ color: colors.primary }}>Today</Text>
-              <Text style={{ color: colors.textMain }}>Check</Text>
-            </Text>
+            {centerContent != null ? (
+              <View style={{ flex: 1, minWidth: 0, marginLeft: 12, justifyContent: 'center' }}>
+                {centerContent}
+              </View>
+            ) : null}
           </View>
-
           <Pressable
             onPress={handleNotificationPress}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}

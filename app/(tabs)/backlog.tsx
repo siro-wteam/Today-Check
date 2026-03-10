@@ -105,37 +105,33 @@ export default function BacklogScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <AppHeader onNotificationPress={handleNotificationPress} />
+      <AppHeader
+        onNotificationPress={handleNotificationPress}
+        centerContent={
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', flex: 1, minWidth: 0 }}>
+            <View style={{ flex: 1, alignItems: 'flex-start', minWidth: 0 }}>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+                Backlog
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
+                {tasks.length}
+              </Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                {' '}issued
+              </Text>
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }} />
+          </View>
+        }
+      />
 
       {/* Notification Center Modal */}
       <NotificationCenterModal
         visible={isNotificationModalVisible}
         onClose={() => setIsNotificationModalVisible(false)}
       />
-
-      {/* 상단: 주간뷰와 동일 높이/폰트 — Backlog [Total N], 블루 영역 없음 */}
-      <View style={{ width: PAGE_WIDTH, alignSelf: 'center' as const }}>
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          marginHorizontal: 16,
-          marginTop: 8,
-          marginBottom: 10,
-          minHeight: 40,
-        }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
-            Backlog
-          </Text>
-          <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
-            [Total {tasks.length}]
-          </Text>
-        </View>
-      </View>
-      </View>
 
       {/* Backlog List - 테스크 영역과 동일 가로 폭 */}
       <View 
