@@ -114,6 +114,7 @@ export default function WeekScreen() {
     rollbackCopyWeek,
   } = useCalendarStore();
   const { filter: taskFilter, toggleFilter } = useTaskFilterStore();
+  const fetchMyGroups = useGroupStore((s) => s.fetchMyGroups);
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { canAddToBacklog, limitMessages } = useSubscriptionLimits();
@@ -135,6 +136,11 @@ export default function WeekScreen() {
       initializeCalendar();
     }
   }, [user?.id, initializeCalendar]);
+
+  // Load groups so group labels and OWNER/ADMIN toggle work on week view
+  useEffect(() => {
+    if (user?.id) fetchMyGroups(user.id);
+  }, [user?.id, fetchMyGroups]);
   
   const flatListRef = useRef<FlatList>(null);
   const scrollViewRefs = useRef<Map<string, ScrollView>>(new Map());
@@ -569,48 +575,24 @@ export default function WeekScreen() {
     handleTaskEdit(task);
   }, [handleTaskEdit]);
   
-  // Calculate progress
+  // 날짜 옆 괄호: 이번 주 [완료/전체], 과거 [N completed], 미래 [N scheduled]
   const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd');
-  // 항상 "오늘(이번 주 오늘)" 데이터 — 지난주/미래주 카드의 오른쪽 Today's Progress용
   const thisWeekPage = weekPages.find(p => p.weekStartStr === THIS_WEEK_START_STR);
   const todayGroupFromThisWeek = thisWeekPage?.dailyGroups.find(g => g.date === todayStr);
   const todayTasksFromThisWeek = todayGroupFromThisWeek?.tasks || [];
   const todayCompleted = todayTasksFromThisWeek.filter(t => t.status === 'DONE').length;
   const todayTotal = todayTasksFromThisWeek.length;
 
-  let progressTitle = '';
-  let progressText = '';
-  let progressPercent = 0;
-  let totalTasks = 0;
-  let completedTasks = 0;
-  let weekLeftTitle = '';
-  let weekLeftValue = '';
-  let weekRightTitle = '';
-  let weekRightValue = '';
+  const weekTasks = currentWeekPage?.dailyGroups?.flatMap(g => g.tasks) || [];
+  const weekCompleted = weekTasks.filter(t => t.status === 'DONE').length;
 
+  let bracketText = '';
   if (isCurrentWeek) {
-    completedTasks = todayCompleted;
-    totalTasks = todayTotal;
-    progressTitle = "Today's Progress";
-    progressText = `${completedTasks}/${totalTasks} Completed`;
-    progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    bracketText = `[Today's progress ${todayCompleted}/${todayTotal}]`;
   } else if (isPastWeek) {
-    const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
-    completedTasks = allWeekTasks.filter(t => t.status === 'DONE').length;
-    totalTasks = allWeekTasks.length;
-    weekLeftTitle = 'Week completed';
-    weekLeftValue = `${completedTasks} completed`;
-    weekRightTitle = "Today's Progress";
-    weekRightValue = `${todayCompleted}/${todayTotal} completed`;
-    progressPercent = 0;
-  } else if (isFutureWeek) {
-    const allWeekTasks = currentWeekPage?.dailyGroups.flatMap(g => g.tasks) || [];
-    totalTasks = allWeekTasks.length;
-    weekLeftTitle = 'Week scheduled';
-    weekLeftValue = `${totalTasks} scheduled`;
-    weekRightTitle = "Today's Progress";
-    weekRightValue = `${todayCompleted}/${todayTotal} completed`;
-    progressPercent = 0;
+    bracketText = `[${weekCompleted} completed]`;
+  } else {
+    bracketText = `[${weekTasks.length} scheduled]`;
   }
 
   const pageWidth = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
@@ -625,149 +607,57 @@ export default function WeekScreen() {
         onClose={() => setIsNotificationModalVisible(false)}
       />
       
-      {/* 상단 영역: 테스크 영역과 동일한 가로 폭(pageWidth + padding 16) */}
+      {/* 상단 한 줄: 날짜 [Today's progress 3/15] | Today 버튼 (높이 항상 동일) */}
       <View style={[ { width: pageWidth, alignSelf: 'center' as const }, Platform.OS === 'web' && { maxWidth: 600 } ]}>
-      {/* Week Progress Card - 이번주: Today+%+바 / 지난주·미래주: 왼쪽 Week completed|scheduled, 오른쪽 Today's Progress */}
-      <View 
-        style={[
-          {
-            backgroundColor: colors.primary,
-            marginHorizontal: 16,
-            marginTop: 8,
-            marginBottom: 10,
-            paddingHorizontal: 16,
-            paddingVertical: 12,
-            borderRadius: borderRadius.xl,
-            minHeight: 104,
-            ...shadows.sm,
-          },
-        ]}
-      >
-        {isCurrentWeek ? (
-          <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 64 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
-                  {progressTitle}
-                </Text>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
-                  {progressText}
-                </Text>
-              </View>
-              <View
-                style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: borderRadius.full,
-                  backgroundColor: 'rgba(255, 255, 255, 0.25)',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground }}>
-                  {progressPercent}%
-                </Text>
-              </View>
-            </View>
-            <View
-              style={{
-                height: 6,
-                marginTop: 10,
-                borderRadius: borderRadius.full,
-                backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                overflow: 'hidden',
-              }}
-            >
-              <View
-                style={{
-                  height: '100%',
-                  width: `${progressPercent}%`,
-                  backgroundColor: colors.primaryForeground,
-                  borderRadius: borderRadius.full,
-                }}
-              />
-            </View>
-          </>
-        ) : (
-          <View style={{ flexDirection: 'row', alignItems: 'stretch', minHeight: 64 }}>
-            <View style={{ flex: 1, justifyContent: 'center' }}>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
-                {weekLeftTitle}
-              </Text>
-              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
-                {weekLeftValue}
-              </Text>
-            </View>
-            <View
-              style={{
-                width: 1,
-                backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                marginVertical: 4,
-                marginHorizontal: 16,
-              }}
-            />
-            <View style={{ flex: 1, justifyContent: 'center' }}>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primaryForeground, opacity: 0.9 }}>
-                {weekRightTitle}
-              </Text>
-              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.primaryForeground, marginTop: 2 }}>
-                {weekRightValue}
-              </Text>
-            </View>
-          </View>
-        )}
-      </View>
-      
-      {/* Week Navigator - 테스크 영역과 동일 가로 여백 */}
-      <View 
+      <View
         style={{
-          backgroundColor: colors.background,
-          paddingHorizontal: 16,
-          paddingVertical: 14,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.borderLight,
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginHorizontal: 16,
+          marginTop: 8,
+          marginBottom: 10,
+          gap: 10,
+          minHeight: 40,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {/* 왼쪽: 고정 너비 (Today 버튼 또는 빈 공간) — 오른쪽과 동일 너비로 날짜가 화면 정중앙에 오도록 */}
-          <View style={{ width: 72, alignItems: 'flex-start', justifyContent: 'center' }}>
-            {!isCurrentWeek ? (
-              <Pressable
-                onPress={goToThisWeek}
-                disabled={isLoading}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                style={{
-                  backgroundColor: colors.primary,
-                  paddingHorizontal: 10,
-                  height: 32,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  borderRadius: borderRadius.md,
-                }}
-              >
-                <Text style={{ fontSize: 14, fontWeight: '600', color: colors.primaryForeground }}>
-                  Today
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-          {/* 가운데: 날짜 범위 (화면 정중앙, 길게 누르면 복사) */}
-          <Pressable
-            style={{ flex: 1, justifyContent: 'center', paddingVertical: 8 }}
-            onLongPress={() => {
-              if (isCurrentWeek || isFutureWeek) {
-                if (copyInProgress || isLoading) return;
-                handleCopyWeekToNext();
-              }
-            }}
-            delayLongPress={400}
-          >
-            <Text style={{ fontSize: 18, fontWeight: '600', color: colors.textMain, textAlign: 'center' }}>
-              {currentWeekDisplay}
-            </Text>
-          </Pressable>
-          {/* 오른쪽: 왼쪽과 동일 너비(72) — 날짜가 화면 정중앙에 오도록 균형 */}
-          <View style={{ width: 72 }} />
+        {/* 날짜 [Today's progress 3/15] 또는 [N completed] / [N scheduled] */}
+        <Pressable
+          style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'baseline', gap: 4 }}
+          onLongPress={() => {
+            if ((isCurrentWeek || isFutureWeek) && !copyInProgress && !isLoading) handleCopyWeekToNext();
+          }}
+          delayLongPress={400}
+        >
+          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }} numberOfLines={1}>
+            {currentWeekDisplay}
+          </Text>
+          <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+            {bracketText}
+          </Text>
+        </Pressable>
+        {/* 오른쪽: Today 이동 버튼 또는 동일 높이 빈 공간 */}
+        <View style={{ width: 64, minHeight: 32, alignItems: 'flex-end', justifyContent: 'center' }}>
+          {!isCurrentWeek ? (
+            <Pressable
+              onPress={goToThisWeek}
+              disabled={isLoading}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={{
+                backgroundColor: colors.primary,
+                paddingHorizontal: 12,
+                height: 32,
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderRadius: borderRadius.md,
+              }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.primaryForeground }}>
+                Today
+              </Text>
+            </Pressable>
+          ) : (
+            <View style={{ width: 64, height: 32 }} />
+          )}
         </View>
       </View>
       </View>
@@ -1027,7 +917,8 @@ const DailyCard = React.memo(function DailyCard({
   const handleToggleComplete = async (task: TaskWithOverdue) => {
     if (toggleInFlightRef.current) return;
     toggleInFlightRef.current = true;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // Defer haptics to next tick so checkbox paint is not delayed
+    queueMicrotask(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}));
 
     const updateTaskInCache = (oldData: any, updateFn: (t: any) => any) => {
       if (!oldData) return oldData;
@@ -1045,20 +936,7 @@ const DailyCard = React.memo(function DailyCard({
       if (myRole === 'OWNER' || myRole === 'ADMIN') {
         const originalTask = useCalendarStore.getState().getTaskById(task.id);
 
-        queryClient.setQueriesData(
-          { queryKey: ['tasks', 'unified'], exact: false },
-          (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
-            ...t,
-            assignees: t.assignees?.map((a: any) => ({
-              ...a,
-              is_completed: shouldComplete,
-              completed_at: shouldComplete ? new Date().toISOString() : null,
-            })),
-            status: newStatus,
-            completed_at: shouldComplete ? new Date().toISOString() : null,
-          }))
-        );
-
+        // Store first (sync) so UI paints immediately; defer query cache to next tick
         if (originalTask) {
           const updatedAssignees = originalTask.assignees?.map((a: any) => ({
             ...a,
@@ -1074,43 +952,44 @@ const DailyCard = React.memo(function DailyCard({
           const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
+        queueMicrotask(() => {
+          queryClient.setQueriesData(
+            { queryKey: ['tasks', 'unified'], exact: false },
+            (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
+              ...t,
+              assignees: t.assignees?.map((a: any) => ({
+                ...a,
+                is_completed: shouldComplete,
+                completed_at: shouldComplete ? new Date().toISOString() : null,
+              })),
+              status: newStatus,
+              completed_at: shouldComplete ? new Date().toISOString() : null,
+            }))
+          );
+        });
 
-        const { error } = await toggleAllAssigneesCompletion(task.id, shouldComplete);
-        if (error) {
+        toggleAllAssigneesCompletion(task.id, shouldComplete).then(({ error }) => {
+          if (error) {
+            if (originalTask) {
+              const tasksWithRollover = calculateRolloverInfo([originalTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          }
+        }).catch(() => {
           if (originalTask) {
             const tasksWithRollover = calculateRolloverInfo([originalTask]);
             useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
           }
           queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-        }
-        // Success: keep optimistic state; do not merge getTaskById to avoid late response overwriting
+        });
       } else if (user) {
         const myAssignee = task.assignees.find((a: any) => a.user_id === user.id);
         if (!myAssignee) return;
         const shouldCompleteMyTask = !myAssignee.is_completed;
         const originalTask = useCalendarStore.getState().getTaskById(task.id);
 
-        // Optimistically update React Query cache
-        queryClient.setQueriesData(
-          { queryKey: ['tasks', 'unified'], exact: false },
-          (oldData: any) => updateTaskInCache(oldData, (t: any) => {
-            const updatedAssignees = t.assignees?.map((a: any) =>
-              a.user_id === user.id
-                ? { ...a, is_completed: shouldCompleteMyTask, completed_at: shouldCompleteMyTask ? new Date().toISOString() : null }
-                : a
-            );
-            const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
-            
-            return {
-              ...t,
-              assignees: updatedAssignees,
-              status: allCompleted ? 'DONE' : 'TODO',
-              completed_at: allCompleted ? new Date().toISOString() : null,
-            };
-          })
-        );
-
-        // Optimistically update Calendar Store (for immediate UI update)
+        // Store first (sync) so UI paints immediately; defer query cache to next tick
         if (originalTask) {
           const updatedAssignees = originalTask.assignees?.map((a: any) =>
             a.user_id === user.id
@@ -1127,27 +1006,43 @@ const DailyCard = React.memo(function DailyCard({
           const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
-
-        try {
-          const { error } = await toggleAssigneeCompletion(
-            task.id,
-            user.id,
-            myAssignee.is_completed
+        queueMicrotask(() => {
+          queryClient.setQueriesData(
+            { queryKey: ['tasks', 'unified'], exact: false },
+            (oldData: any) => updateTaskInCache(oldData, (t: any) => {
+              const updatedAssignees = t.assignees?.map((a: any) =>
+                a.user_id === user.id
+                  ? { ...a, is_completed: shouldCompleteMyTask, completed_at: shouldCompleteMyTask ? new Date().toISOString() : null }
+                  : a
+              );
+              const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
+              return {
+                ...t,
+                assignees: updatedAssignees,
+                status: allCompleted ? 'DONE' : 'TODO',
+                completed_at: allCompleted ? new Date().toISOString() : null,
+              };
+            })
           );
-          if (error) {
+        });
+
+        toggleAssigneeCompletion(task.id, user.id, myAssignee.is_completed)
+          .then(({ error }) => {
+            if (error) {
+              if (originalTask) {
+                const tasksWithRollover = calculateRolloverInfo([originalTask]);
+                useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+              }
+              queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+            }
+          })
+          .catch(() => {
             if (originalTask) {
               const tasksWithRollover = calculateRolloverInfo([originalTask]);
               useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-          }
-        } catch (error) {
-          if (originalTask) {
-            const tasksWithRollover = calculateRolloverInfo([originalTask]);
-            useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-          }
-          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-        }
+          });
       }
       return;
     }
@@ -1168,7 +1063,7 @@ const DailyCard = React.memo(function DailyCard({
       updates.original_due_date = todayStr;
     }
 
-    await updateTaskInStore(task.id, updates);
+    updateTaskInStore(task.id, updates).catch(() => {});
     } finally {
       toggleInFlightRef.current = false;
     }
@@ -1307,6 +1202,7 @@ const DailyCard = React.memo(function DailyCard({
                   {isDone ? (
                     <Pressable
                       onPress={() => handleToggleComplete(task)}
+                      delayPressIn={0}
                       style={{
                         backgroundColor: colors.gray500,
                         justifyContent: 'center',
@@ -1389,6 +1285,7 @@ const DailyCard = React.memo(function DailyCard({
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                       <Pressable
                         onPress={() => handleToggleComplete(task)}
+                        delayPressIn={0}
                         hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                         pressRetentionOffset={{ top: 22, bottom: 22, left: 22, right: 22 }}
                         style={[
@@ -1426,6 +1323,7 @@ const DailyCard = React.memo(function DailyCard({
                               const globalHandler = (globalThis as any).handleTaskEdit;
                               if (typeof globalHandler === 'function') globalHandler(task);
                             }}
+                            delayPressIn={0}
                             style={{ flex: 1, minWidth: 0 }}
                             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                             pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}

@@ -186,36 +186,33 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       }
     }
     
-    // Optimistic update: Update immediately in store
+    // Optimistic update: only store sync so first paint is instant
     const updatedTask = { ...task, ...updateFields };
     get().mergeTasksIntoStore([updatedTask]);
-    
-    // Also update React Query cache optimistically
-    queryClient.setQueriesData(
-      { queryKey: ['tasks', 'unified'], exact: false },
-      (oldData: any) => {
-        if (!oldData) return oldData;
-        return oldData.map((t: any) => t.id === taskId ? { ...t, ...updateFields } : t);
+
+    // Defer query cache + notification to next tick so tap feels instant
+    const updateQueryAndNotification = () => {
+      queryClient.setQueriesData(
+        { queryKey: ['tasks', 'unified'], exact: false },
+        (oldData: any) => {
+          if (!oldData) return oldData;
+          return oldData.map((t: any) => t.id === taskId ? { ...t, ...updateFields } : t);
+        }
+      );
+      if (updateFields.due_date !== undefined || updateFields.due_time !== undefined || updateFields.status !== undefined) {
+        const finalTask = { ...task, ...updateFields } as Task;
+        if (finalTask.status === 'DONE' || finalTask.status === 'CANCEL') {
+          cancelAllNotificationsForTask(taskId).catch(console.error);
+        } else if (finalTask.due_date && finalTask.due_time) {
+          updateTaskNotification(finalTask).catch(console.error);
+        } else {
+          cancelAllNotificationsForTask(taskId).catch(console.error);
+        }
       }
-    );
-    
-    // Handle notification scheduling/updating
-    // If due_date or due_time changed, update notification
-    if (updateFields.due_date !== undefined || updateFields.due_time !== undefined || updateFields.status !== undefined) {
-      const finalTask = { ...task, ...updateFields } as Task;
-      
-      // If task is completed or cancelled, cancel notification
-      if (finalTask.status === 'DONE' || finalTask.status === 'CANCEL') {
-        cancelAllNotificationsForTask(taskId).catch(console.error);
-      } else if (finalTask.due_date && finalTask.due_time) {
-        // Reschedule notification if task has due_date and due_time
-        updateTaskNotification(finalTask).catch(console.error);
-      } else {
-        // Cancel notification if due_date or due_time is removed
-        cancelAllNotificationsForTask(taskId).catch(console.error);
-      }
-    }
-    
+    };
+    if (typeof setImmediate !== 'undefined') setImmediate(updateQueryAndNotification);
+    else setTimeout(updateQueryAndNotification, 0);
+
     try {
       // API call in background
       const result = await updateTaskAPI({ id: taskId, ...updateFields });

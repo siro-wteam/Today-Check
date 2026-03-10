@@ -23,7 +23,7 @@ import { useAuth } from '@/lib/hooks/use-auth';
 import { justCompletedOnboarding, setJustCompletedOnboarding } from '@/lib/constants/onboarding';
 import { useOnboardingComplete } from '@/lib/hooks/use-onboarding';
 import { queryClient } from '@/lib/query-client';
-import { setQueryClientForGroupStore, useGroupStore } from '@/lib/stores/useGroupStore';
+import { setQueryClientForGroupStore } from '@/lib/stores/useGroupStore';
 import '../global.css';
 
 // Keep the splash screen visible while we fetch resources
@@ -50,14 +50,8 @@ function RootLayoutNav() {
   const { hasSeenOnboarding, reloadFromStorage } = useOnboardingComplete();
   const segments = useSegments();
   const router = useRouter();
-  const { fetchMyGroups } = useGroupStore();
 
-  // Fetch groups once when user is authenticated (centralized)
-  useEffect(() => {
-    if (isAuthenticated && user?.id) {
-      fetchMyGroups(user.id);
-    }
-  }, [isAuthenticated, user?.id, fetchMyGroups]);
+  // Groups are fetched when the Group tab is focused (so skeleton shows on first open); modals fetch when needed
 
   // After leaving onboarding, re-read storage and clear "just completed" flag
   useEffect(() => {

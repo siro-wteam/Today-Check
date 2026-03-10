@@ -21,6 +21,7 @@ import { Copy, Crown, Users, Trash2, LogOut, Share2, Shield, MoreVertical, Edit2
 import { colors, borderRadius, shadows } from '@/constants/colors';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useAuth } from '@/lib/hooks/use-auth';
+import { useGroupDeleteLeave } from '@/lib/hooks/use-group-delete-leave';
 import * as Haptics from 'expo-haptics';
 import { showToast } from '@/utils/toast';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -342,71 +343,14 @@ export default function GroupDetailScreen() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!group || !isOwner) return;
-
-    if (!user?.id) {
-      showToast('error', 'Error', 'User not found');
-      return;
-    }
-
-    // Web: Use window.confirm
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm('Are you sure you want to delete this group? This action cannot be undone.');
-      if (!confirmed) {
-        console.log('User cancelled deleting group');
-        return;
-      }
-
-      try {
-        console.log('Deleting group:', group.id, 'User:', user.id);
-        const { success, error } = await deleteGroup(group.id, user.id);
-        
-        if (success) {
-          console.log('Successfully deleted group');
-          router.back();
-        } else {
-          console.error('Failed to delete group:', error);
-          showToast('error', 'Error', error || 'Failed to delete group. Please try again.');
-        }
-      } catch (err: any) {
-        console.error('Exception deleting group:', err);
-        showToast('error', 'Error', err.message || 'An error occurred while deleting the group.');
-      }
-      return;
-    }
-
-    // Native: Use Alert.alert
-    Alert.alert(
-      'Delete Group',
-      'Are you sure you want to delete this group? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-              console.log('Deleting group:', group.id, 'User:', user.id);
-              const { success, error } = await deleteGroup(group.id, user.id);
-              
-              if (success) {
-                console.log('Successfully deleted group');
-                router.back();
-              } else {
-                console.error('Failed to delete group:', error);
-                showToast('error', 'Error', error || 'Failed to delete group. Please try again.');
-              }
-            } catch (err: any) {
-              console.error('Exception deleting group:', err);
-              showToast('error', 'Error', err.message || 'An error occurred while deleting the group.');
-            }
-          },
-        },
-      ]
-    );
-  };
+  const { confirmDeleteGroup, confirmLeaveGroup } = useGroupDeleteLeave(
+    user?.id,
+    deleteGroup,
+    leaveGroup,
+    { onSuccessDelete: () => router.back(), onSuccessLeave: () => router.back() }
+  );
+  const handleDelete = () => group && confirmDeleteGroup(group);
+  const handleLeave = () => group && confirmLeaveGroup(group);
 
   const handlePromoteMember = async (targetUserId: string) => {
     if (!group || !canManageRoles) return;
@@ -740,75 +684,6 @@ export default function GroupDetailScreen() {
     options.push({ text: 'Cancel', style: 'cancel' });
 
     Alert.alert(`Manage ${member.name}`, undefined, options);
-  };
-
-  const handleLeave = async () => {
-    if (!group || isOwner) {
-      console.log('Cannot leave: group=', group, 'isOwner=', isOwner);
-      return;
-    }
-
-    if (!user?.id) {
-      showToast('error', 'Error', 'User not found');
-      return;
-    }
-
-    // Web: Use window.confirm
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm('Are you sure you want to leave this group?');
-      if (!confirmed) {
-        console.log('User cancelled leaving group');
-        return;
-      }
-
-      try {
-        console.log('Leaving group:', group.id, 'User:', user.id);
-        const { success, error } = await leaveGroup(group.id, user.id);
-        
-        if (success) {
-          console.log('Successfully left group');
-          router.back();
-        } else {
-          console.error('Failed to leave group:', error);
-          showToast('error', 'Error', error || 'Failed to leave group. Please try again.');
-        }
-      } catch (err: any) {
-        console.error('Exception leaving group:', err);
-        showToast('error', 'Error', err.message || 'An error occurred while leaving the group.');
-      }
-      return;
-    }
-
-    // Native: Use Alert.alert
-    Alert.alert(
-      'Leave Group',
-      'Are you sure you want to leave this group?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              console.log('Leaving group:', group.id, 'User:', user.id);
-              const { success, error } = await leaveGroup(group.id, user.id);
-              
-              if (success) {
-                console.log('Successfully left group');
-                router.back();
-              } else {
-                console.error('Failed to leave group:', error);
-                showToast('error', 'Error', error || 'Failed to leave group. Please try again.');
-              }
-            } catch (err: any) {
-              console.error('Exception leaving group:', err);
-              showToast('error', 'Error', err.message || 'An error occurred while leaving the group.');
-            }
-          },
-        },
-      ]
-    );
   };
 
   if (!group) {

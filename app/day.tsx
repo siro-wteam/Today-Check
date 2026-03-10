@@ -73,7 +73,12 @@ export default function HomeScreen() {
       initializeCalendar();
     }
   }, [initializeCalendar]);
-  
+
+  // Load groups so group labels and OWNER/ADMIN toggle work on day view
+  useEffect(() => {
+    if (user?.id) fetchMyGroups(user.id);
+  }, [user?.id, fetchMyGroups]);
+
   // Extract jumpToDateStr from params
   const jumpToDateStr = useMemo(() => {
     if (!params.jumpToDate) return undefined;
@@ -1004,7 +1009,7 @@ function TaskItem({
     }
     if (toggleInFlightRef.current) return;
     toggleInFlightRef.current = true;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    queueMicrotask(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}));
 
     const updateTaskInCache = (oldData: any, updateFn: (t: any) => any) => {
       if (!oldData) return oldData;
@@ -1021,20 +1026,7 @@ function TaskItem({
       if (myRole === 'OWNER' || myRole === 'ADMIN') {
         const originalTask = useCalendarStore.getState().getTaskById(task.id);
 
-        queryClient.setQueriesData(
-          { queryKey: ['tasks', 'unified'], exact: false },
-          (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
-            ...t,
-            assignees: t.assignees?.map((a: any) => ({
-              ...a,
-              is_completed: shouldComplete,
-              completed_at: shouldComplete ? new Date().toISOString() : null,
-            })),
-            status: targetStatus,
-            completed_at: shouldComplete ? new Date().toISOString() : null,
-          }))
-        );
-
+        // Store first (sync) so UI paints immediately; defer query cache to next tick
         if (originalTask) {
           const updatedAssignees = originalTask.assignees?.map((a: any) => ({
             ...a,
@@ -1050,15 +1042,39 @@ function TaskItem({
           const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
+        queueMicrotask(() => {
+          queryClient.setQueriesData(
+            { queryKey: ['tasks', 'unified'], exact: false },
+            (oldData: any) => updateTaskInCache(oldData, (t: any) => ({
+              ...t,
+              assignees: t.assignees?.map((a: any) => ({
+                ...a,
+                is_completed: shouldComplete,
+                completed_at: shouldComplete ? new Date().toISOString() : null,
+              })),
+              status: targetStatus,
+              completed_at: shouldComplete ? new Date().toISOString() : null,
+            }))
+          );
+        });
 
-        const { error } = await toggleAllAssigneesCompletion(task.id, shouldComplete);
-        if (error) {
-          if (originalTask) {
-            const tasksWithRollover = calculateRolloverInfo([originalTask]);
-            useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-          }
-          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-        }
+        toggleAllAssigneesCompletion(task.id, shouldComplete)
+          .then(({ error }) => {
+            if (error) {
+              if (originalTask) {
+                const tasksWithRollover = calculateRolloverInfo([originalTask]);
+                useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+              }
+              queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+            }
+          })
+          .catch(() => {
+            if (originalTask) {
+              const tasksWithRollover = calculateRolloverInfo([originalTask]);
+              useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+            }
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+          });
       } else if (user) {
         // Member: toggle own status only
         const myAssignee = task.assignees.find((a: any) => a.user_id === user.id);
@@ -1067,24 +1083,7 @@ function TaskItem({
         const shouldCompleteMyTask = !myAssignee.is_completed;
         const originalTask = useCalendarStore.getState().getTaskById(task.id);
 
-        queryClient.setQueriesData(
-          { queryKey: ['tasks', 'unified'], exact: false },
-          (oldData: any) => updateTaskInCache(oldData, (t: any) => {
-            const updatedAssignees = t.assignees?.map((a: any) =>
-              a.user_id === user.id
-                ? { ...a, is_completed: shouldCompleteMyTask, completed_at: shouldCompleteMyTask ? new Date().toISOString() : null }
-                : a
-            );
-            const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
-            return {
-              ...t,
-              assignees: updatedAssignees,
-              status: allCompleted ? 'DONE' : 'TODO',
-              completed_at: allCompleted ? new Date().toISOString() : null,
-            };
-          })
-        );
-
+        // Store first (sync) so UI paints immediately; defer query cache to next tick
         if (originalTask) {
           const updatedAssignees = originalTask.assignees?.map((a: any) =>
             a.user_id === user.id
@@ -1101,23 +1100,43 @@ function TaskItem({
           const tasksWithRollover = calculateRolloverInfo([optimisticTask]);
           useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
         }
+        queueMicrotask(() => {
+          queryClient.setQueriesData(
+            { queryKey: ['tasks', 'unified'], exact: false },
+            (oldData: any) => updateTaskInCache(oldData, (t: any) => {
+              const updatedAssignees = t.assignees?.map((a: any) =>
+                a.user_id === user.id
+                  ? { ...a, is_completed: shouldCompleteMyTask, completed_at: shouldCompleteMyTask ? new Date().toISOString() : null }
+                  : a
+              );
+              const allCompleted = updatedAssignees?.every((a: any) => a.is_completed) ?? false;
+              return {
+                ...t,
+                assignees: updatedAssignees,
+                status: allCompleted ? 'DONE' : 'TODO',
+                completed_at: allCompleted ? new Date().toISOString() : null,
+              };
+            })
+          );
+        });
 
-        try {
-          const { error } = await toggleAssigneeCompletion(task.id, user.id, myAssignee.is_completed);
-          if (error) {
+        toggleAssigneeCompletion(task.id, user.id, myAssignee.is_completed)
+          .then(({ error }) => {
+            if (error) {
+              if (originalTask) {
+                const tasksWithRollover = calculateRolloverInfo([originalTask]);
+                useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
+              }
+              queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+            }
+          })
+          .catch(() => {
             if (originalTask) {
               const tasksWithRollover = calculateRolloverInfo([originalTask]);
               useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
             }
             queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-          }
-        } catch (error) {
-          if (originalTask) {
-            const tasksWithRollover = calculateRolloverInfo([originalTask]);
-            useCalendarStore.getState().mergeTasksIntoStore(tasksWithRollover);
-          }
-          queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-        }
+          });
       }
       return;
     }
@@ -1141,8 +1160,8 @@ function TaskItem({
       updates.original_due_date = todayStr;
     }
 
-    // Use store function (handles optimistic update and API call)
-    await updateTaskInStore(task.id, updates);
+    // Use store function (optimistic update then API in background)
+    updateTaskInStore(task.id, updates).catch(() => {});
     } finally {
       toggleInFlightRef.current = false;
     }
@@ -1295,6 +1314,7 @@ function TaskItem({
                 <Pressable
                   onPress={handleCheckboxPress}
                   disabled={isCheckboxDisabled}
+                  delayPressIn={0}
                   hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                   pressRetentionOffset={{ top: 22, bottom: 22, left: 22, right: 22 }}
                   style={[
@@ -1348,6 +1368,7 @@ function TaskItem({
                   titleLongPressHandledRef.current = true;
                   handleTitlePress();
                 }}
+                delayPressIn={0}
                 style={{ flexShrink: 1, minWidth: 0 }}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 pressRetentionOffset={{ top: 20, bottom: 20, left: 20, right: 20 }}

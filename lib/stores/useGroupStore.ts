@@ -4,10 +4,14 @@
  * Manages group creation, deletion, joining, and leaving functionality with Supabase backend.
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import type { Group } from '../types';
 import { supabase } from '../supabase';
+
+const GROUP_ORDER_KEY = (userId: string) => `group_order_${userId}`;
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { getGroupOrder, setGroupOrder } from '../api/group-order';
 import {
   createGroup as createGroupAPI,
   joinGroupByCode as joinGroupByCodeAPI,
@@ -72,6 +76,7 @@ interface GroupState {
   subscribeToGroupMembers: (userId: string, onKickedFromGroup?: (groupId: string) => void) => () => void;
   unsubscribeFromGroupMembers: () => void;
   setCurrentGroup: (group: Group | null) => void;
+  setGroupsOrder: (orderedGroups: Group[], userId: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -189,7 +194,31 @@ export const useGroupStore = create<GroupState>((set, get) => ({
           return;
         }
 
-        const updatedGroups = data || [];
+        let updatedGroups = data || [];
+        let orderIds: string[] | null = null;
+        const { data: apiOrder } = await getGroupOrder(userId);
+        if (apiOrder && apiOrder.length > 0) orderIds = apiOrder;
+        if (!orderIds) {
+          try {
+            const saved = await AsyncStorage.getItem(GROUP_ORDER_KEY(userId));
+            if (saved) orderIds = JSON.parse(saved);
+          } catch (_) {
+            // ignore
+          }
+        }
+        if (orderIds && orderIds.length > 0) {
+          const byId = new Map(updatedGroups.map((g) => [g.id, g]));
+          const ordered: Group[] = [];
+          for (const id of orderIds) {
+            const g = byId.get(id);
+            if (g) {
+              ordered.push(g);
+              byId.delete(id);
+            }
+          }
+          byId.forEach((g) => ordered.push(g));
+          updatedGroups = ordered;
+        }
         set((state) => {
           let updatedCurrentGroup = state.currentGroup;
           if (updatedCurrentGroup) {
@@ -1044,6 +1073,17 @@ export const useGroupStore = create<GroupState>((set, get) => ({
 
   setCurrentGroup: (group: Group | null) => {
     set({ currentGroup: group });
+  },
+
+  setGroupsOrder: async (orderedGroups: Group[], userId: string) => {
+    const ids = orderedGroups.map((g) => g.id);
+    set({ groups: orderedGroups });
+    try {
+      await AsyncStorage.setItem(GROUP_ORDER_KEY(userId), JSON.stringify(ids));
+    } catch (_) {
+      // ignore
+    }
+    await setGroupOrder(userId, ids); // sync to backend so web + other devices get same order
   },
 
   clearError: () => {

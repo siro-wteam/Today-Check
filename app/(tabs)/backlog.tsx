@@ -5,10 +5,11 @@ import { EmptyState } from '@/components/EmptyState';
 import { NotificationCenterModal } from '@/components/NotificationCenterModal';
 import { TaskListSkeleton } from '@/components/TaskListSkeleton';
 import { borderRadius, colors, shadows } from '@/constants/colors';
-import { deleteTask, updateTask } from '@/lib/api/tasks';
+import { deleteTask, toggleAllAssigneesCompletion, toggleAssigneeCompletion, updateTask } from '@/lib/api/tasks';
 import { useAuth } from '@/lib/hooks/use-auth';
 import { useBacklogTasks } from '@/lib/hooks/use-backlog-tasks';
 import { useSubscriptionLimits } from '@/lib/hooks/use-subscription-limits';
+import { useCalendarStore } from '@/lib/stores/useCalendarStore';
 import { useGroupStore } from '@/lib/stores/useGroupStore';
 import { useTaskFilterStore } from '@/lib/stores/useTaskFilterStore';
 import type { Task } from '@/lib/types';
@@ -19,7 +20,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import { CalendarCheck, Check, Clock, MapPin, Package, Trash2, Undo2, Users } from 'lucide-react-native';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { showToast } from '@/utils/toast';
@@ -34,8 +35,15 @@ const PAGE_WIDTH = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_
 export default function BacklogScreen() {
   const { tasks, isLoading, isError, error, refetch } = useBacklogTasks();
   const { filter: taskFilter } = useTaskFilterStore();
+  const { user } = useAuth();
+  const fetchMyGroups = useGroupStore((s) => s.fetchMyGroups);
   const [refreshing, setRefreshing] = useState(false);
   const queryClient = useQueryClient();
+
+  // Load groups so group labels and OWNER/ADMIN toggle work on backlog
+  useEffect(() => {
+    if (user?.id) fetchMyGroups(user.id);
+  }, [user?.id, fetchMyGroups]);
 
   const filteredTasks = useMemo(() => {
     if (!taskFilter) return tasks;
@@ -106,22 +114,25 @@ export default function BacklogScreen() {
         onClose={() => setIsNotificationModalVisible(false)}
       />
 
-      {/* 상단 영역: 테스크 리스트와 동일한 가로 폭 */}
+      {/* 상단: 주간뷰와 동일 높이/폰트 — Backlog [Total N], 블루 영역 없음 */}
       <View style={{ width: PAGE_WIDTH, alignSelf: 'center' as const }}>
-      {/* Section Header - 주간뷰와 동일 블루 배경 */}
-      <View style={styles.sectionHeader}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Package size={20} color={colors.primaryForeground} strokeWidth={2} />
-          <Text style={styles.sectionTitle}>
-            No Due Date
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginHorizontal: 16,
+          marginTop: 8,
+          marginBottom: 10,
+          minHeight: 40,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+            Backlog
           </Text>
-          {tasks.filter(t => t.status === 'TODO').length > 0 && (
-            <View style={styles.sectionHeaderBadge}>
-              <Text style={styles.sectionHeaderBadgeText}>
-                {filteredTasks.filter(t => t.status === 'TODO').length}
-              </Text>
-            </View>
-          )}
+          <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+            [Total {tasks.length}]
+          </Text>
         </View>
       </View>
       </View>
@@ -232,7 +243,7 @@ function BacklogItem({
   const handleToggleComplete = async () => {
     if (toggleInFlightRef.current) return;
     toggleInFlightRef.current = true;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    queueMicrotask(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}));
 
     const updateTaskInCache = (oldData: any, updateFn: (t: any) => any) => {
       if (!oldData) return oldData;
@@ -308,48 +319,48 @@ function BacklogItem({
         const todayStr = format(new Date(), 'yyyy-MM-dd');
         const mergedForCalendar = { ...task, ...updates } as Task;
         if (newCompletionStatus && !task.due_date) mergedForCalendar.due_date = todayStr;
-        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
         useCalendarStore.getState().mergeTasksIntoStore([mergedForCalendar]);
 
-        try {
-          const { toggleAllAssigneesCompletion, updateTask } = await import('@/lib/api/tasks');
-          const { error } = await toggleAllAssigneesCompletion(task.id, newCompletionStatus);
-
-          if (error) {
-            console.error('Error toggling all assignees:', error);
-            // Rollback calendar store and queries
-            const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
-            useCalendarStore.getState().mergeTasksIntoStore([task]);
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-          } else {
-            // When completing from backlog (no due_date), persist due_date/original_due_date to today
-            if (newCompletionStatus && !task.due_date) {
-              if (!isSubscribed) {
-                const { allowed, message } = await checkCanAddTaskToDate(todayStr);
-                if (!allowed) {
-                  showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
-                  queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-                  queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-                  return;
-                }
-              }
-              await updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr });
-              showToast('success', 'Moved to today', 'Task completed and moved to today.');
-            }
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-          }
-        } catch (error) {
-          console.error('Exception toggling all assignees:', error);
-          const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+        const rollbackOwner = () => {
           useCalendarStore.getState().mergeTasksIntoStore([task]);
           queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-        }
+        };
+        toggleAllAssigneesCompletion(task.id, newCompletionStatus)
+          .then(({ error }) => {
+            if (error) {
+              console.error('Error toggling all assignees:', error);
+              rollbackOwner();
+            } else {
+              if (newCompletionStatus && !task.due_date) {
+                if (!isSubscribed) {
+                  checkCanAddTaskToDate(todayStr).then(({ allowed, message }) => {
+                    if (!allowed) {
+                      showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
+                      queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+                      queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+                    } else {
+                      updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr }).then(() => {
+                        showToast('success', 'Moved to today', 'Task completed and moved to today.');
+                      });
+                    }
+                  });
+                } else {
+                  updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr }).then(() => {
+                    showToast('success', 'Moved to today', 'Task completed and moved to today.');
+                  });
+                }
+              }
+              queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+              queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+              queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
+            }
+          })
+          .catch((err) => {
+            console.error('Exception toggling all assignees:', err);
+            rollbackOwner();
+          });
       } else if (user) {
         // Member: toggle own status only
         const myAssignee = task.assignees.find(a => a.user_id === user.id);
@@ -405,49 +416,46 @@ function BacklogItem({
         const memberAllCompleted = memberUpdatedAssignees?.every((a: any) => a.is_completed) ?? false;
         const mergedForCalendar = { ...task, assignees: memberUpdatedAssignees, status: memberAllCompleted ? 'DONE' : 'TODO', completed_at: memberAllCompleted ? new Date().toISOString() : null } as Task;
         if (memberAllCompleted && !task.due_date) mergedForCalendar.due_date = format(new Date(), 'yyyy-MM-dd');
-        const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
         useCalendarStore.getState().mergeTasksIntoStore([mergedForCalendar]);
 
-        try {
-          const { toggleAssigneeCompletion, updateTask } = await import('@/lib/api/tasks');
-          const { error } = await toggleAssigneeCompletion(
-            task.id,
-            user.id,
-            myAssignee.is_completed
-          );
-
-          if (error) {
-            console.error('Error toggling assignee:', error);
-            // Rollback calendar store and queries
-            const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
-            useCalendarStore.getState().mergeTasksIntoStore([task]);
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-            queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-          } else {
-            if (memberAllCompleted && !task.due_date) {
-              const todayStr = format(new Date(), 'yyyy-MM-dd');
-              if (!isSubscribed) {
-                const { allowed, message } = await checkCanAddTaskToDate(todayStr);
-                if (!allowed) {
-                  showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
-                  queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
-                  queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
-                  return;
-                }
-              }
-              await updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr });
-              showToast('success', 'Moved to today', 'Task completed and moved to today.');
-            }
-          }
-        } catch (error) {
-          console.error('Exception toggling assignee:', error);
-          const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+        const rollbackMember = () => {
           useCalendarStore.getState().mergeTasksIntoStore([task]);
           queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
           queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-        }
+        };
+        toggleAssigneeCompletion(task.id, user.id, myAssignee.is_completed)
+          .then(({ error }) => {
+            if (error) {
+              console.error('Error toggling assignee:', error);
+              rollbackMember();
+            } else {
+              if (memberAllCompleted && !task.due_date) {
+                const todayStr = format(new Date(), 'yyyy-MM-dd');
+                if (!isSubscribed) {
+                  checkCanAddTaskToDate(todayStr).then(({ allowed, message }) => {
+                    if (!allowed) {
+                      showToast('error', 'Limit', message ?? 'Free plan: max 5 tasks per date. Upgrade to add more.');
+                      queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
+                      queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
+                    } else {
+                      updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr }).then(() => {
+                        showToast('success', 'Moved to today', 'Task completed and moved to today.');
+                      });
+                    }
+                  });
+                } else {
+                  updateTask({ id: task.id, due_date: todayStr, original_due_date: todayStr }).then(() => {
+                    showToast('success', 'Moved to today', 'Task completed and moved to today.');
+                  });
+                }
+              }
+            }
+          })
+          .catch((err) => {
+            console.error('Exception toggling assignee:', err);
+            rollbackMember();
+          });
       }
       return;
     }
@@ -500,25 +508,26 @@ function BacklogItem({
 
     // Optimistic update for weekly view (calendar store)
     const mergedForCalendar = { ...task, ...updates, completed_at: newStatus === 'DONE' ? new Date().toISOString() : null } as Task;
-    const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
     useCalendarStore.getState().mergeTasksIntoStore([mergedForCalendar]);
 
-    try {
-      await updateTask({ id: task.id, ...updates });
-      if (newStatus === 'TODO' && !task.due_date) {
-        showToast('success', 'Scheduled', 'Scheduled for today');
-      } else if (newStatus === 'DONE' && !task.due_date) {
-        showToast('success', 'Moved to today', 'Task completed and moved to today.');
-      }
-    } catch (error) {
-      console.error('Error updating task:', error);
-      // Rollback calendar store to original task
-      const { useCalendarStore } = await import('@/lib/stores/useCalendarStore');
+    const rollbackPersonal = () => {
       useCalendarStore.getState().mergeTasksIntoStore([task]);
       queryClient.invalidateQueries({ queryKey: ['tasks', 'backlog'] });
       queryClient.invalidateQueries({ queryKey: ['tasks', 'unified'] });
       queryClient.invalidateQueries({ queryKey: ['tasks', 'today'] });
-    }
+    };
+    updateTask({ id: task.id, ...updates })
+      .then(() => {
+        if (newStatus === 'TODO' && !task.due_date) {
+          showToast('success', 'Scheduled', 'Scheduled for today');
+        } else if (newStatus === 'DONE' && !task.due_date) {
+          showToast('success', 'Moved to today', 'Task completed and moved to today.');
+        }
+      })
+      .catch((error) => {
+        console.error('Error updating task:', error);
+        rollbackPersonal();
+      });
     } finally {
       toggleInFlightRef.current = false;
     }
@@ -991,34 +1000,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     ...(Platform.OS === 'web' && { height: '100vh' }),
-  },
-  sectionHeader: {
-    backgroundColor: colors.primary,
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderRadius: borderRadius.xl,
-    justifyContent: 'center',
-    alignItems: 'center',
-    ...shadows.sm,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.primaryForeground,
-  },
-  sectionHeaderBadge: {
-    borderRadius: borderRadius.full,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  sectionHeaderBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primaryForeground,
   },
   badge: {
     borderRadius: borderRadius.full,
