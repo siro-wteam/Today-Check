@@ -37,7 +37,7 @@ function getCompactWeekRange(weekStart: Date, weekEnd: Date): string {
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { calculateRolloverInfo, duplicateTasksToNextWeek, moveTaskToBacklog, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, MapPin, Package, Plus, Target, Trash2, Undo2, Users } from 'lucide-react-native';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Copy, MapPin, Package, Plus, Target, Trash2, Undo2, Users } from 'lucide-react-native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -650,8 +650,18 @@ export default function WeekScreen() {
                 )}
               </View>
             </View>
-            <View style={{ flex: 1, alignItems: 'flex-end', minWidth: 0, marginRight: Platform.OS === 'web' ? 0 : 16 }}>
-              {!isCurrentWeek ? (
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 12, minWidth: 0, marginRight: Platform.OS === 'web' ? 0 : 16 }}>
+              {(isCurrentWeek || isFutureWeek) && (
+                <Pressable
+                  onPress={() => !copyInProgress && !isLoading && handleCopyWeekToNext()}
+                  disabled={copyInProgress || isLoading}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, (copyInProgress || isLoading) && { opacity: 0.5 }]}
+                >
+                  <Copy size={18} color={colors.textSub} strokeWidth={2} />
+                </Pressable>
+              )}
+              {!isCurrentWeek && (
                 <Pressable
                   onPress={goToThisWeek}
                   disabled={isLoading}
@@ -660,7 +670,7 @@ export default function WeekScreen() {
                 >
                   <Target size={18} color={colors.textSub} strokeWidth={2} />
                 </Pressable>
-              ) : null}
+              )}
             </View>
           </View>
         }
