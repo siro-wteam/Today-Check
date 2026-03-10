@@ -21,6 +21,19 @@ import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
+
+/** Compact week range for header: "Mr 23–29" or "Mr 30 – Ap 5" (2-letter month where needed to avoid ambiguity) */
+function getCompactWeekRange(weekStart: Date, weekEnd: Date): string {
+  const initials = ['Ja', 'F', 'Mr', 'Ap', 'My', 'Jn', 'Jl', 'Au', 'S', 'O', 'N', 'D'];
+  const startMonth = weekStart.getMonth();
+  const endMonth = weekEnd.getMonth();
+  const startDay = format(weekStart, 'd');
+  const endDay = format(weekEnd, 'd');
+  if (startMonth === endMonth) {
+    return `${initials[startMonth]} ${startDay}–${endDay}`;
+  }
+  return `${initials[startMonth]} ${startDay} – ${initials[endMonth]} ${endDay}`;
+}
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { calculateRolloverInfo, duplicateTasksToNextWeek, moveTaskToBacklog, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
@@ -204,7 +217,7 @@ export default function WeekScreen() {
       
       const weekStartStr = format(weekStart, 'yyyy-MM-dd');
       const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
-      const displayRange = `${format(weekStart, 'MMM d')} - ${format(weekEnd, 'MMM d')}`;
+      const displayRange = getCompactWeekRange(weekStart, weekEnd);
       
       // Generate daily groups with tasks from tasksByDate
       const dailyGroups: DailyGroup[] = eachDayOfInterval({
@@ -590,8 +603,9 @@ export default function WeekScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader
         onNotificationPress={() => setIsNotificationModalVisible(true)}
+        onLogoPress={goToThisWeek}
         centerContent={
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', flex: 1, minWidth: 0 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', alignSelf: 'stretch', minWidth: 0 }}>
             <View style={{ flex: 1, alignItems: 'flex-start', minWidth: 0 }}>
               <Pressable
                 onLongPress={() => {
@@ -609,7 +623,7 @@ export default function WeekScreen() {
                 {isCurrentWeek ? (
                   <>
                     <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
-                      Today's progress{' '}
+                      Today's{' '}
                     </Text>
                     <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
                       {todayCompleted}/{todayTotal}
@@ -617,26 +631,26 @@ export default function WeekScreen() {
                   </>
                 ) : isPastWeek ? (
                   <>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                      Completed{' '}
+                    </Text>
                     <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
                       {weekCompleted}
-                    </Text>
-                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
-                      {' '}completed
                     </Text>
                   </>
                 ) : (
                   <>
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                      Scheduled{' '}
+                    </Text>
                     <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
                       {weekTasks.length}
-                    </Text>
-                    <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
-                      {' '}scheduled
                     </Text>
                   </>
                 )}
               </View>
             </View>
-            <View style={{ flex: 1, alignItems: 'flex-end', minWidth: 0 }}>
+            <View style={{ flex: 1, alignItems: 'flex-end', minWidth: 0, marginRight: Platform.OS === 'web' ? 0 : 16 }}>
               {!isCurrentWeek ? (
                 <Pressable
                   onPress={goToThisWeek}

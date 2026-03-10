@@ -19,6 +19,7 @@ import { openLocationInMaps } from '@/lib/utils/open-maps';
 import { useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 import { CalendarCheck, Check, Clock, MapPin, Package, Trash2, Undo2, Users } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -33,12 +34,17 @@ const AVAILABLE_HEIGHT = SCREEN_HEIGHT - HEADER_HEIGHT - TITLE_BAR_HEIGHT;
 const PAGE_WIDTH = Platform.OS === 'web' ? Math.min(SCREEN_WIDTH, 600) : SCREEN_WIDTH;
 
 export default function BacklogScreen() {
+  const router = useRouter();
   const { tasks, isLoading, isError, error, refetch } = useBacklogTasks();
   const { filter: taskFilter } = useTaskFilterStore();
   const { user } = useAuth();
   const fetchMyGroups = useGroupStore((s) => s.fetchMyGroups);
   const [refreshing, setRefreshing] = useState(false);
   const queryClient = useQueryClient();
+
+  const goToToday = useCallback(() => {
+    router.push('/(tabs)');
+  }, [router]);
 
   // Load groups so group labels and OWNER/ADMIN toggle work on backlog
   useEffect(() => {
@@ -71,7 +77,7 @@ export default function BacklogScreen() {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
-        <AppHeader onNotificationPress={handleNotificationPress} />
+        <AppHeader onNotificationPress={handleNotificationPress} onLogoPress={goToToday} />
         <View style={{ flex: 1 }}>
           <TaskListSkeleton />
         </View>
@@ -82,7 +88,7 @@ export default function BacklogScreen() {
   if (isError) {
     return (
       <SafeAreaView style={styles.container}>
-        <AppHeader onNotificationPress={handleNotificationPress} />
+        <AppHeader onNotificationPress={handleNotificationPress} onLogoPress={goToToday} />
         <View className="flex-1 items-center justify-center">
             <Text style={{ fontSize: 40, marginBottom: 16, color: colors.textMain }}>⚠️</Text>
           <Text style={[styles.textMain, { fontSize: 16, fontWeight: '600', marginBottom: 8 }]}>
@@ -107,8 +113,9 @@ export default function BacklogScreen() {
     <SafeAreaView style={styles.container}>
       <AppHeader
         onNotificationPress={handleNotificationPress}
+        onLogoPress={goToToday}
         centerContent={
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', flex: 1, minWidth: 0 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', alignSelf: 'stretch', minWidth: 0 }}>
             <View style={{ flex: 1, alignItems: 'flex-start', minWidth: 0 }}>
               <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
                 Backlog

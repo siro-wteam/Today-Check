@@ -11,11 +11,13 @@ import { NotificationCenterModal } from './NotificationCenterModal';
 
 interface AppHeaderProps {
   onNotificationPress?: () => void;
+  /** Optional: when provided, logo is pressable and triggers this (e.g. week view: go to today) */
+  onLogoPress?: () => void;
   /** Optional center content (e.g. week view: date + progress + Today, backlog: Backlog [Total N]) */
   centerContent?: ReactNode;
 }
 
-export function AppHeader({ onNotificationPress, centerContent }: AppHeaderProps) {
+export function AppHeader({ onNotificationPress, onLogoPress, centerContent }: AppHeaderProps) {
   const [isNotificationModalVisible, setIsNotificationModalVisible] = useState(false);
   const { user } = useAuth();
   
@@ -67,17 +69,36 @@ export function AppHeader({ onNotificationPress, centerContent }: AppHeaderProps
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0, marginRight: 8 }}>
-            <View
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: borderRadius.sm,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <LogoIcon size={28} color={colors.primary} />
-            </View>
+            {onLogoPress ? (
+              <Pressable
+                onPress={onLogoPress}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={({ pressed }) => [
+                  {
+                    width: 28,
+                    height: 28,
+                    borderRadius: borderRadius.sm,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <LogoIcon size={28} color={colors.primary} />
+              </Pressable>
+            ) : (
+              <View
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: borderRadius.sm,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <LogoIcon size={28} color={colors.primary} />
+              </View>
+            )}
             {centerContent != null ? (
               <View style={{ flex: 1, minWidth: 0, marginLeft: 12, justifyContent: 'center' }}>
                 {centerContent}

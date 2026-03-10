@@ -117,12 +117,17 @@ export default function ProfileScreen() {
     }
   };
 
+  const goToToday = useCallback(() => {
+    router.push('/(tabs)');
+  }, [router]);
+
   // Wait for user so profile/email are available (avoids empty on first load)
   if (!user) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
         <AppHeader
           onNotificationPress={handleNotificationPress}
+          onLogoPress={goToToday}
           centerContent={
             <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
               Profile
@@ -141,6 +146,7 @@ export default function ProfileScreen() {
       {/* Header */}
       <AppHeader
         onNotificationPress={handleNotificationPress}
+        onLogoPress={goToToday}
         centerContent={
           <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
             Profile

@@ -248,11 +248,15 @@ export default function GroupScreen() {
   const ownedCount = user?.id ? groups.filter((g) => g.ownerId === user.id).length : 0;
   const memberCount = groups.length;
 
+  const goToToday = useCallback(() => {
+    router.push('/(tabs)');
+  }, [router]);
+
   if (!user) {
     return (
       <SafeAreaView style={styles.container}>
         {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
-        <AppHeader />
+        <AppHeader onLogoPress={goToToday} />
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -264,6 +268,7 @@ export default function GroupScreen() {
     <SafeAreaView style={styles.container}>
       {Platform.OS === 'android' && <View style={{ height: insets.top }} />}
       <AppHeader
+        onLogoPress={goToToday}
         centerContent={
           <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0 }}>
             <View style={{ flex: 1, alignItems: 'flex-start', minWidth: 0 }}>
