@@ -88,11 +88,12 @@ export interface UpdateTaskInput {
   title?: string;
   description?: string;
   status?: 'TODO' | 'DONE' | 'CANCEL';
-  due_date?: string;
+  due_date?: string | null;
   due_time?: string;
   due_time_end?: string;
   completed_at?: string | null;
   location?: string | null;
+  original_due_date?: string | null;
 }
 
 /**
