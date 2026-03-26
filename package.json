@@ -17,7 +17,8 @@
     "lint": "expo lint",
     "build": "npx expo export -p web",
     "splash:export": "node scripts/export-splash-png.js",
-    "postinstall": "node scripts/patch-expo-ios-device.js"
+    "postinstall": "node scripts/patch-expo-ios-device.js",
+    "test": "jest"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -62,10 +63,13 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/react": "~19.1.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "jest": "^29.7.0",
     "sharp": "^0.34.5",
+    "ts-jest": "^29.4.6",
     "typescript": "~5.9.2"
   },
   "private": true
