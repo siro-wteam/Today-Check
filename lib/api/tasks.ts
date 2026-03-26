@@ -2,44 +2,9 @@
  * Tasks API - CRUD operations for tasks
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { addDays, differenceInCalendarDays, format, parse, parseISO } from 'date-fns';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 
-// Supabase 클라이언트 import
-const supabase: SupabaseClient = createClient(
-  Constants.expoConfig?.extra?.supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '',
-  Constants.expoConfig?.extra?.supabaseAnonKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
-  {
-    auth: {
-      storage: Platform.OS === 'web' ? {
-        getItem: (key: string) => {
-          if (typeof window !== 'undefined') {
-            return Promise.resolve(window.localStorage.getItem(key));
-          }
-          return Promise.resolve(null);
-        },
-        setItem: (key: string, value: string) => {
-          if (typeof window !== 'undefined') {
-            window.localStorage.setItem(key, value);
-          }
-          return Promise.resolve();
-        },
-        removeItem: (key: string) => {
-          if (typeof window !== 'undefined') {
-            window.localStorage.removeItem(key);
-          }
-          return Promise.resolve();
-        },
-      } : AsyncStorage,
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: false,
-    },
-  }
-);
+import { supabase } from '../supabase';
 
 // 타입 단순화를 위한 any 타입 사용
 export type SupabaseResult<T> = {
@@ -55,7 +20,7 @@ export interface Task {
   id: string;
   title: string;
   description: string | null;
-  status: 'TODO' | 'DONE' | 'CANCELLED';
+  status: 'TODO' | 'DONE' | 'CANCEL';
   due_date: string | null;
   due_time: string | null;
   due_time_end: string | null;
@@ -74,7 +39,7 @@ export interface TaskWithRollover {
   id: string;
   title: string;
   description: string | null;
-  status: 'TODO' | 'DONE' | 'CANCELLED';
+  status: 'TODO' | 'DONE' | 'CANCEL';
   due_date: string | null;
   due_time: string | null;
   due_time_end: string | null;
@@ -98,7 +63,7 @@ export interface TaskWithRollover {
 export interface CreateTaskInput {
   title: string;
   description?: string;
-  status?: 'TODO' | 'DONE' | 'CANCELLED';
+  status?: 'TODO' | 'DONE' | 'CANCEL';
   due_date?: string;
   due_time?: string;
   due_time_end?: string;
@@ -122,7 +87,7 @@ export interface UpdateTaskInput {
   id: string;
   title?: string;
   description?: string;
-  status?: 'TODO' | 'DONE' | 'CANCELLED';
+  status?: 'TODO' | 'DONE' | 'CANCEL';
   due_date?: string;
   due_time?: string;
   due_time_end?: string;

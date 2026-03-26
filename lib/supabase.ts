@@ -78,19 +78,19 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// 🔍 디버깅을 위한 전역 노출 (웹 환경에서만)
-if (typeof window !== 'undefined') {
+// 디버깅용 전역 노출 (개발 환경 + 웹에서만)
+if (__DEV__ && typeof window !== 'undefined') {
   (window as any).supabase = supabase;
-  console.log('🔍 Supabase client exposed globally for debugging');
-  
-  // 🛡️ 초기화 상태 모니터링
+  console.log('Supabase client exposed globally for debugging');
+
+  // 초기화 상태 모니터링
   supabase.auth.onAuthStateChange((event, session) => {
-    console.log('🔐 Auth state change:', { event, hasSession: !!session });
+    console.log('Auth state change:', { event, hasSession: !!session });
     if (session) {
-      console.log('👤 User authenticated:', session.user.email);
+      console.log('User authenticated:', session.user.email);
     }
   });
-  
+
   // Note: Do NOT wrap getSession() to return session: null - that causes groups/tasks
   // API to run with auth.uid() = null and RLS returns [] (e.g. groups?select=*&id=eq.xxx → []).
 }
