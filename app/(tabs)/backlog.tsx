@@ -122,11 +122,11 @@ export default function BacklogScreen() {
               </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
+                issued{' '}
+              </Text>
               <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
                 {tasks.length}
-              </Text>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
-                {' '}issued
               </Text>
             </View>
             <View style={{ flex: 1, minWidth: 0 }} />

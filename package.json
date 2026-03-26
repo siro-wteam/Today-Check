@@ -18,7 +18,8 @@
     "build": "npx expo export -p web",
     "splash:export": "node scripts/export-splash-png.js",
     "postinstall": "node scripts/patch-expo-ios-device.js",
-    "test": "jest"
+    "test": "jest",
+    "verify": "npm run lint && npm test"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

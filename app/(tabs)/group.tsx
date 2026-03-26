@@ -277,7 +277,7 @@ export default function GroupScreen() {
               </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
                 I own{' '}
               </Text>
               <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
@@ -286,7 +286,7 @@ export default function GroupScreen() {
               <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
                 ,{' '}
               </Text>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
                 I&apos;m in{' '}
               </Text>
               <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
