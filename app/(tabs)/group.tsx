@@ -287,7 +287,7 @@ export default function GroupScreen() {
                 ,{' '}
               </Text>
               <Text style={{ fontSize: 14, fontWeight: '600', color: colors.textMain }}>
-                I'm in{' '}
+                I&apos;m in{' '}
               </Text>
               <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
                 {memberCount}

@@ -623,7 +623,7 @@ export default function WeekScreen() {
                 {isCurrentWeek ? (
                   <>
                     <Text style={{ fontSize: 14, fontWeight: '500', color: colors.textSub }}>
-                      Today's{' '}
+                      Today&apos;s{' '}
                     </Text>
                     <Text style={{ fontSize: 14, fontWeight: '500', color: colors.primary }}>
                       {todayCompleted}/{todayTotal}

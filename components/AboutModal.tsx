@@ -170,7 +170,7 @@ export function AboutModal({ visible, onClose }: AboutModalProps) {
               lineHeight: 20,
               marginBottom: spacing.md,
             }}>
-              TodayCheck isn't just about tracking tasks. It's about growing with your friends and family. 
+              TodayCheck isn&apos;t just about tracking tasks. It&apos;s about growing with your friends and family. 
               Create groups, share your progress, and keep each other motivated.
             </Text>
 

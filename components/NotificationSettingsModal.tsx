@@ -269,7 +269,7 @@ export function NotificationSettingsModal({ visible, onClose }: NotificationSett
               color: colors.textSub,
               lineHeight: 20,
             }}>
-              💡 When notifications are turned off, you won't receive any alerts for task reminders, group activities, or other app notifications.
+              💡 When notifications are turned off, you won&apos;t receive any alerts for task reminders, group activities, or other app notifications.
             </Text>
           </View>
         </View>

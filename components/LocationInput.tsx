@@ -150,6 +150,18 @@ export function LocationInput({
     }
   }, [value]);
 
+  const handleCancel = useCallback(() => {
+    sessionTokenRef.current = null;
+    if (expandedWhenEmpty) {
+      onCollapse?.();
+    } else {
+      setIsExpanded(false);
+    }
+    setSearchQuery('');
+    setSuggestions([]);
+    setPlaceIds([]);
+  }, [expandedWhenEmpty, onCollapse]);
+
   if (value != null && value.trim() !== '' && !effectiveExpanded) {
     return (
       <View className="flex-row items-center gap-2 flex-wrap">
@@ -204,18 +216,6 @@ export function LocationInput({
   }
 
   // Expanded: input + suggestions list (value is null and expanded, or user tapped Add location)
-  const handleCancel = useCallback(() => {
-    sessionTokenRef.current = null;
-    if (expandedWhenEmpty) {
-      onCollapse?.();
-    } else {
-      setIsExpanded(false);
-    }
-    setSearchQuery('');
-    setSuggestions([]);
-    setPlaceIds([]);
-  }, [expandedWhenEmpty, onCollapse]);
-
   return (
     <View>
       <View
