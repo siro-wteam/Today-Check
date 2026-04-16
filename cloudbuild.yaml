@@ -1,17 +1,16 @@
 steps:
   - name: gcr.io/cloud-builders/docker
     id: Build
+    entrypoint: bash
     args:
-      - build
-      - --no-cache
-      - --build-arg=EXPO_PUBLIC_SUPABASE_URL=$$EXPO_PUBLIC_SUPABASE_URL
-      - --build-arg=EXPO_PUBLIC_SUPABASE_ANON_KEY=$$EXPO_PUBLIC_SUPABASE_ANON_KEY
-      - --build-arg=EXPO_PUBLIC_GOOGLE_PLACES_API_KEY=$$EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
-      - -t
-      - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-web:$COMMIT_SHA
-      - .
-      - -f
-      - Dockerfile
+      - -c
+      - |
+        docker build --no-cache \
+          --build-arg EXPO_PUBLIC_SUPABASE_URL=$$EXPO_PUBLIC_SUPABASE_URL \
+          --build-arg EXPO_PUBLIC_SUPABASE_ANON_KEY=$$EXPO_PUBLIC_SUPABASE_ANON_KEY \
+          --build-arg EXPO_PUBLIC_GOOGLE_PLACES_API_KEY=$$EXPO_PUBLIC_GOOGLE_PLACES_API_KEY \
+          -t asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-web:$COMMIT_SHA \
+          -f Dockerfile .
     secretEnv:
       - EXPO_PUBLIC_SUPABASE_URL
       - EXPO_PUBLIC_SUPABASE_ANON_KEY
