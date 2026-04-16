@@ -11,7 +11,7 @@ const MINE_INACTIVE: LabelStyle = { bg: '#64748b', text: '#f8fafc' }; // slate-5
 const MINE_ACTIVE: LabelStyle = { bg: '#475569', text: '#fff', borderWidth: 2, borderColor: '#94a3b8' }; // slate-600 + ring
 
 /** Palette for group labels: inactive (bg, text) and active/toggled (solid accent) */
-const GROUP_LABEL_PALETTE: Array<{ bg: string; text: string; activeBg: string; activeText: string }> = [
+const GROUP_LABEL_PALETTE: { bg: string; text: string; activeBg: string; activeText: string }[] = [
   { bg: '#dbeafe', text: '#1e40af', activeBg: '#1e40af', activeText: '#fff' },
   { bg: '#d1fae5', text: '#047857', activeBg: '#047857', activeText: '#fff' },
   { bg: '#ede9fe', text: '#5b21b6', activeBg: '#5b21b6', activeText: '#fff' },
@@ -28,7 +28,7 @@ export function getMineLabelStyle(isToggled: boolean): LabelStyle {
 
 export function getGroupLabelStyle(
   groupId: string,
-  groupOrder: Array<{ id: string }>,
+  groupOrder: { id: string }[],
   isToggled: boolean
 ): LabelStyle {
   const index = groupOrder.findIndex((g) => g.id === groupId);

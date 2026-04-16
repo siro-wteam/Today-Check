@@ -21,6 +21,14 @@ import { showToast } from '@/utils/toast';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { addWeeks, differenceInCalendarDays, eachDayOfInterval, endOfWeek, format, parseISO, startOfDay, startOfWeek } from 'date-fns';
+import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
+import { calculateRolloverInfo, duplicateTasksToNextWeek, moveTaskToBacklog, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
+import { Archive, Check, ChevronLeft, ChevronRight, Clock, Copy, MapPin, Package, Plus, Target, Trash2, Undo2, Users } from 'lucide-react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /** Compact week range for header: "Mr 23–29" or "Mr 30 – Ap 5" (2-letter month where needed to avoid ambiguity) */
 function getCompactWeekRange(weekStart: Date, weekEnd: Date): string {
@@ -34,14 +42,6 @@ function getCompactWeekRange(weekStart: Date, weekEnd: Date): string {
   }
   return `${initials[startMonth]} ${startDay} – ${initials[endMonth]} ${endDay}`;
 }
-import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
-import { calculateRolloverInfo, duplicateTasksToNextWeek, moveTaskToBacklog, toggleAllAssigneesCompletion, toggleAssigneeCompletion } from '@/lib/api/tasks';
-import { Archive, Check, ChevronLeft, ChevronRight, Clock, Copy, MapPin, Package, Plus, Target, Trash2, Undo2, Users } from 'lucide-react-native';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Dimensions, FlatList, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, Text, View, ViewToken } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;

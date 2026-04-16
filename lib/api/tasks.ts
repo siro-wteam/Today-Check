@@ -6,6 +6,9 @@ import { addDays, differenceInCalendarDays, format, parse, parseISO } from 'date
 
 import { supabase } from '../supabase';
 
+// Import shared profile fetching utility
+import { fetchProfiles } from './profiles';
+
 // 타입 단순화를 위한 any 타입 사용
 export type SupabaseResult<T> = {
   data: T | null;
@@ -410,9 +413,6 @@ export async function getBacklogTasks(): Promise<{ data: Task[] | null; error: a
 
   return { data: data as Task[], error: null };
 }
-
-// Import shared profile fetching utility
-import { fetchProfiles } from './profiles';
 
 /**
  * Enrich tasks with profile data for assignees (with caching)

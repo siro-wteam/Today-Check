@@ -8,8 +8,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import type { Group } from '../types';
 import { supabase } from '../supabase';
-
-const GROUP_ORDER_KEY = (userId: string) => `group_order_${userId}`;
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getGroupOrder, setGroupOrder } from '../api/group-order';
 import {
@@ -25,6 +23,8 @@ import {
   kickMember as kickMemberAPI,
 } from '../api/groups';
 import { fetchProfiles } from '../api/profiles';
+
+const GROUP_ORDER_KEY = (userId: string) => `group_order_${userId}`;
 
 // Lazy import for React Query (to avoid circular dependencies)
 let queryClientInstance: any = null;

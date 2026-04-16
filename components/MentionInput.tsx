@@ -33,7 +33,7 @@ interface MentionInputProps {
   placeholder?: string;
   editable?: boolean;
   autoFocus?: boolean;
-  mentions: Array<{ memberId: string; memberName: string }>; // Selected assignees
+  mentions: { memberId: string; memberName: string }[]; // Selected assignees
   onMentionRemove?: (memberId: string) => void;
   style?: any;
 }

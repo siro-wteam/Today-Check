@@ -1,0 +1,13 @@
+node_modules
+dist
+.expo
+.git
+.github
+__tests__
+*.md
+.env*
+android
+ios
+.claude
+.bkit
+.cursorrules

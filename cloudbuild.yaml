@@ -1,0 +1,37 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: Build
+    args:
+      - build
+      - --no-cache
+      - -t
+      - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+      - .
+      - -f
+      - Dockerfile
+
+  - name: gcr.io/cloud-builders/docker
+    id: Push
+    args:
+      - push
+      - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: Deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - todaycheck-app
+      - --platform=managed
+      - --image=asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+      - --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID
+      - --region=asia-northeast3
+      - --quiet
+
+images:
+  - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+
+options:
+  logging: CLOUD_LOGGING_ONLY

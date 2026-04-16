@@ -12,8 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-import { Crown, LogOut, Plus, Trash2, UserPlus, Users } from 'lucide-react-native';
-import { Link2 } from 'lucide-react-native';
+import { Crown, LogOut, Plus, Trash2, UserPlus, Users , Link2 } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import {
     ActivityIndicator,
