@@ -7,7 +7,7 @@ ENV EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 ENV EXPO_PUBLIC_GOOGLE_PLACES_API_KEY=AIzaSyCD-TkxHlIhkMF0_EW4DlVn1Pvqvv5cfZU
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 COPY . .
 RUN npx expo export -p web
 
