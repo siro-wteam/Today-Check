@@ -4,17 +4,24 @@ steps:
     args:
       - build
       - --no-cache
+      - --build-arg=EXPO_PUBLIC_SUPABASE_URL=$$EXPO_PUBLIC_SUPABASE_URL
+      - --build-arg=EXPO_PUBLIC_SUPABASE_ANON_KEY=$$EXPO_PUBLIC_SUPABASE_ANON_KEY
+      - --build-arg=EXPO_PUBLIC_GOOGLE_PLACES_API_KEY=$$EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
       - -t
-      - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+      - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-web:$COMMIT_SHA
       - .
       - -f
       - Dockerfile
+    secretEnv:
+      - EXPO_PUBLIC_SUPABASE_URL
+      - EXPO_PUBLIC_SUPABASE_ANON_KEY
+      - EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
 
   - name: gcr.io/cloud-builders/docker
     id: Push
     args:
       - push
-      - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+      - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-web:$COMMIT_SHA
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: Deploy
@@ -23,15 +30,24 @@ steps:
       - run
       - services
       - update
-      - todaycheck-app
+      - todaycheck-web
       - --platform=managed
-      - --image=asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+      - --image=asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-web:$COMMIT_SHA
       - --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID
       - --region=asia-northeast3
       - --quiet
 
 images:
-  - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-app:$COMMIT_SHA
+  - asia-northeast3-docker.pkg.dev/todaycheck-app/cloud-run-source-deploy/todaycheck-web:$COMMIT_SHA
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/todaycheck-app/secrets/EXPO_PUBLIC_SUPABASE_URL/versions/latest
+      env: EXPO_PUBLIC_SUPABASE_URL
+    - versionName: projects/todaycheck-app/secrets/EXPO_PUBLIC_SUPABASE_ANON_KEY/versions/latest
+      env: EXPO_PUBLIC_SUPABASE_ANON_KEY
+    - versionName: projects/todaycheck-app/secrets/EXPO_PUBLIC_GOOGLE_PLACES_API_KEY/versions/latest
+      env: EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
 
 options:
   logging: CLOUD_LOGGING_ONLY
