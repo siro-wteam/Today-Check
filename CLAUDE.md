@@ -93,7 +93,7 @@ constants/              # 디자인 토큰, 구독 설정
 
 ## 관련 문서
 
-- `.claude/rules/` - 코딩 컨벤션, DB 스키마, React Query, 테스트 정책
+- `.claude/rules/` - 코딩 컨벤션, DB 스키마, React Query, 테스트 정책, RN/Expo 네이티브 gate / OTA vs Store / 환경변수 시크릿
 - `REFACTORING_PLAN.md` - 리팩토링 단계별 계획
 - `STORE_PUBLISH_CHECKLIST.md` - 앱스토어 출시 체크리스트
 
