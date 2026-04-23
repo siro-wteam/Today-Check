@@ -20,7 +20,8 @@
     "postinstall": "node scripts/patch-expo-ios-device.js",
     "test": "jest",
     "verify": "npm run lint && npm test",
-    "typecheck": "npx tsc --noEmit"
+    "typecheck": "npx tsc --noEmit",
+    "typecheck:baseline": "bash scripts/typecheck-baseline.sh"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
